@@ -1,74 +1,58 @@
-# dependencies
-node_modules
+```
+# Dependencies
+node_modules/
 
-# output
-out
-dist
-dist-electron
-release
-web-build
-*.tgz
+# Build artifacts
+dist/
+build/
+target/
 
-# code coverage
-coverage
-*.lcov
-
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-
-# local databases
-*.db
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-.env*.local
-
-# caches
-.eslintcache
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
 .cache
-*.tsbuildinfo
-.turbo
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+*.pot
+*.mo
+MoeIDE.setting
+project_*.pyo
 
-# IntelliJ based IDEs
-.idea
+# Logs
+*.log
 
-# macOS
+# Environment variables
+.env
+.env.local
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
 .DS_Store
-
-# Expo
-.expo/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-*.pem
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# generated native folders
-ios
-android
-
-# scripts (local-only provisioning)
-scripts/
-!packages/mobile/scripts/
-packages/mobile/scripts/*
-!packages/mobile/scripts/generate-ios-certs.py
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```
