@@ -8,6 +8,9 @@ import ClienteDetallePage from "./pages/cliente-detalle";
 import PrestamosPage from "./pages/prestamos";
 import PrestamoNuevoPage from "./pages/prestamo-nuevo";
 import PrestamoDetallePage from "./pages/prestamo-detalle";
+import PanderosPage from "./pages/panderos";
+import PanderoNuevoPage from "./pages/pandero-nuevo";
+import PanderoDetallePage from "./pages/pandero-detalle";
 import ConfigPage from "./pages/config";
 
 function App() {
@@ -38,6 +41,15 @@ function App() {
         </Route>
         <Route path="/prestamos/:id">
           <PrestamoDetallePage />
+        </Route>
+        <Route path="/panderos">
+          <PanderosPage />
+        </Route>
+        <Route path="/panderos/nuevo">
+          <PanderoNuevoPage />
+        </Route>
+        <Route path="/panderos/:id">
+          <PanderoDetallePage />
         </Route>
         <Route path="/config">
           <ConfigPage />

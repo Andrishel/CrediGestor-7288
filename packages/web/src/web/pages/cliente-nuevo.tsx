@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { User, Phone, MapPin, UserCheck, Save } from "lucide-react";
+import { User, MapPin, UserCheck, Save } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";

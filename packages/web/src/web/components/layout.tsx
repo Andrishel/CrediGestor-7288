@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Home, Users, FileText, Settings, ChevronLeft } from "lucide-react";
+import { Home, Users, FileText, Users2, Settings, ChevronLeft } from "lucide-react";
 import { cn } from "../lib/utils";
 
 interface AppShellProps {
@@ -16,6 +16,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
     { href: "/", label: "Inicio", icon: Home },
     { href: "/clientes", label: "Clientes", icon: Users },
     { href: "/prestamos", label: "Préstamos", icon: FileText },
+    { href: "/panderos", label: "Panderos", icon: Users2 },
     { href: "/config", label: "Configuración", icon: Settings },
   ];
 
@@ -38,7 +39,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
           <nav className="hidden md:flex items-center gap-1 bg-slate-800/60 p-1.5 rounded-2xl border border-slate-700/50">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = location === item.href;
+              const active = location === item.href || (item.href !== "/" && location.startsWith(item.href));
               return (
                 <Link
                   key={item.href}
@@ -73,7 +74,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
           <div className="mx-auto flex max-w-md justify-around py-2">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = location === item.href;
+              const active = location === item.href || (item.href !== "/" && location.startsWith(item.href));
               return (
                 <Link
                   key={item.href}

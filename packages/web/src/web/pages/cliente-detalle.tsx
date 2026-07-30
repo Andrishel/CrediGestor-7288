@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { User, Phone, MapPin, Edit3, Plus, Share2, ShieldAlert, X, Save } from "lucide-react";
+import { Phone, MapPin, Edit3, Plus, Share2, ShieldAlert, X, Save } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner, Field, inputClass } from "../components/ui/primitives";
 import { formatMoneda, iniciales, scoreColor, scoreBg, cn } from "../lib/utils";
