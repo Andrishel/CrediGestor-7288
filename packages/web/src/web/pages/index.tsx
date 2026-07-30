@@ -15,6 +15,7 @@ import {
   Coins,
   Share2,
   CheckCircle2,
+  X,
 } from "lucide-react";
 import { AppShell } from "../components/layout";
 import { Button, CardSkeleton, EmptyState, Badge } from "../components/ui/primitives";
@@ -67,6 +68,8 @@ export default function Dashboard() {
     montoPagado: number;
     saldoRestante: number;
     codigo: string;
+    operacionId: string;
+    fechaHora: string;
   } | null>(null);
 
   const [simMonto, setSimMonto] = useState("500");
@@ -137,19 +140,8 @@ export default function Dashboard() {
       const { data: cuotasData } = await supabase
         .from("cuotas")
         .select(`
-          id,
-          numero_cuota,
-          fecha_vencimiento,
-          monto_cuota,
-          mora_acumulada,
-          estado,
-          prestamos (
-            id,
-            clientes (
-              nombre_completo,
-              direccion_puesto
-            )
-          )
+          id, numero_cuota, fecha_vencimiento, monto_cuota, mora_acumulada, estado,
+          prestamos ( id, codigo_prestamo, clientes ( nombre_completo, direccion_puesto ) )
         `)
         .neq("estado", "PAGADO")
         .order("fecha_vencimiento", { ascending: true });
@@ -172,14 +164,15 @@ export default function Dashboard() {
         }
 
         const montoBase = Number(cu.monto_cuota || 0);
+        const codigoPres = pObj?.codigo_prestamo || `PRES-${(pObj?.id || "").substring(0, 6).toUpperCase()}`;
 
         return {
           cuotaId: cu.id,
           prestamoId: pObj?.id || "",
           clienteNombre: cObj?.nombre_completo || "Cliente",
-          codigoPrestamo: `PRES-${(pObj?.id || "").substring(0, 6).toUpperCase()}`,
+          codigoPrestamo: codigoPres,
           numeroCuota: cu.numero_cuota,
-          direccionPuesto: cObj?.direccion_puesto || "Mercado Principal",
+          direccionPuesto: cObj?.direccion_puesto || "General",
           montoCuota: montoBase,
           diasRetraso,
           moraCalculada,
@@ -204,7 +197,9 @@ export default function Dashboard() {
   const zonasDisponibles = useMemo(() => {
     const zonas = new Set<string>();
     ruta.forEach((r) => {
-      if (r.direccionPuesto) zonas.add(r.direccionPuesto.split("-")[0].trim());
+      if (r.direccionPuesto && r.direccionPuesto !== "General") {
+        zonas.add(r.direccionPuesto.split("-")[0].trim());
+      }
     });
     return Array.from(zonas);
   }, [ruta]);
@@ -217,20 +212,29 @@ export default function Dashboard() {
   const realizarCobro = async (item: RutaItem) => {
     setCobrandoId(item.cuotaId);
     try {
+      const operacionId = `OP-${Math.floor(Math.random() * 10000000).toString(16).toUpperCase()}`;
+      const fechaActual = new Date().toISOString();
+
       const { error: pErr } = await supabase.from("pagos").insert([
         {
           prestamo_id: item.prestamoId,
           cuota_id: item.cuotaId,
           monto_pagado: item.totalPagar,
           metodo_pago: "EFECTIVO",
-          fecha_pago: new Date().toISOString(),
+          fecha_pago: fechaActual,
+          numero_operacion: operacionId,
         },
       ]);
       if (pErr) throw pErr;
 
       const { error: cErr } = await supabase
         .from("cuotas")
-        .update({ estado: "PAGADO", mora_acumulada: item.moraCalculada })
+        .update({ 
+          estado: "PAGADO", 
+          monto_abonado: item.montoCuota,
+          saldo_cuota: 0,
+          mora_acumulada: item.moraCalculada 
+        })
         .eq("id", item.cuotaId);
       if (cErr) throw cErr;
 
@@ -257,6 +261,8 @@ export default function Dashboard() {
         montoPagado: item.totalPagar,
         saldoRestante: nuevoSaldo,
         codigo: item.codigoPrestamo,
+        operacionId,
+        fechaHora: fechaActual,
       });
 
       await cargarDashboard();
@@ -269,7 +275,6 @@ export default function Dashboard() {
 
   const exportarExcel = () => {
     if (rutaFiltrada.length === 0) return alert("No hay cuotas registradas para exportar.");
-    // Añadimos \uFEFF para que Excel lea correctamente los acentos y símbolos UTF-8
     let csvContent = "data:text/csv;charset=utf-8,\uFEFFCliente,Prestamo,Cuota,Vencimiento,Direccion,Monto,Mora,Total,Estado\n";
     rutaFiltrada.forEach((r) => {
       csvContent += `"${r.clienteNombre}","${r.codigoPrestamo}",${r.numeroCuota},"${r.fechaVencimiento}","${r.direccionPuesto}",${r.montoCuota},${r.moraCalculada},${r.totalPagar},"${r.vencida ? "Vencida" : "Pendiente"}"\n`;
@@ -293,7 +298,7 @@ export default function Dashboard() {
   return (
     <>
       <AppShell>
-        <div className="print:hidden">
+        <div className={cn("print:hidden", reciboModal && "hidden md:block")}>
           {isLoading ? (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -388,19 +393,19 @@ export default function Dashboard() {
                           window.print();
                         }}
                         className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
-                        title="Imprimir o generar PDF"
+                        title="Imprimir Hoja de Ruta"
                       >
                         <Printer size={15} />
-                        <span className="hidden sm:inline">PDF</span>
+                        <span className="hidden sm:inline">Ruta</span>
                       </button>
                     </div>
                   </div>
 
                   {rutaFiltrada.length === 0 ? (
                     <EmptyState
-                      icon={<MapPin size={32} />}
-                      titulo="Sin cuotas pendientes"
-                      mensaje="No hay cuotas pendientes para el mercado seleccionado."
+                      icon={filtroZona !== "TODAS" ? <MapPin size={32} /> : <CheckCircle2 size={38} className="text-emerald-500" />}
+                      titulo={filtroZona !== "TODAS" ? "Sin cuotas en esta zona" : "¡Día libre de cobros!"}
+                      mensaje={filtroZona !== "TODAS" ? "No hay cuotas pendientes para el mercado seleccionado." : "Excelente trabajo. No hay cobros programados para hoy ni clientes en mora."}
                     />
                   ) : (
                     <div className="space-y-3">
@@ -515,96 +520,124 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+        </div>
 
-          {/* Recibo modal */}
-          {reciboModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                  <CheckCircle2 size={32} />
-                </div>
-                <div>
-                  <h3 className="font-display text-lg font-bold text-slate-900">¡Pago Registrado!</h3>
-                  <p className="text-xs text-slate-500">Comprobante generado exitosamente.</p>
+        {/* Modal Recibo Oficial */}
+        {reciboModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:bg-white print:p-0">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-5 text-center print:shadow-none print:p-0">
+              
+              <div className="print:hidden mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                <CheckCircle2 size={32} />
+              </div>
+              <div className="print:hidden">
+                <h3 className="font-display text-lg font-bold text-slate-900">¡Pago Registrado!</h3>
+                <p className="text-xs text-slate-500">Comprobante oficial generado exitosamente.</p>
+              </div>
+
+              {/* Diseño de Ticket a Imprimir */}
+              <div className="rounded-2xl bg-slate-50 p-5 text-left text-xs space-y-3 border border-slate-100 print:border-none print:bg-white print:p-2">
+                <div className="border-b border-slate-300 pb-3 mb-2 text-center">
+                  <h2 className="font-display text-xl font-black text-slate-900 tracking-widest uppercase">CrediGestor</h2>
+                  <p className="text-[10px] text-slate-500 uppercase mt-0.5">Comprobante de Pago</p>
                 </div>
 
-                <div className="rounded-2xl bg-slate-50 p-4 text-left text-xs space-y-2 border border-slate-100">
-                  <p className="flex justify-between"><span className="text-slate-500">Cliente:</span> <strong className="text-slate-900">{reciboModal.clienteNombre}</strong></p>
-                  <p className="flex justify-between"><span className="text-slate-500">Código:</span> <strong className="text-slate-900">{reciboModal.codigo}</strong></p>
-                  <p className="flex justify-between"><span className="text-slate-500">Monto Cobrado:</span> <strong className="text-emerald-600 text-sm font-black">{formatMoneda(reciboModal.montoPagado, moneda)}</strong></p>
-                  <p className="flex justify-between"><span className="text-slate-500">Saldo Restante:</span> <strong className="text-slate-900">{formatMoneda(reciboModal.saldoRestante, moneda)}</strong></p>
+                <div className="space-y-1.5 text-slate-700">
+                  <p className="flex justify-between"><span>Transacción:</span> <strong className="font-mono">{reciboModal.operacionId}</strong></p>
+                  <p className="flex justify-between"><span>Crédito:</span> <strong>{reciboModal.codigo}</strong></p>
+                  <p className="flex justify-between"><span>Cliente:</span> <strong className="truncate max-w-[150px]">{reciboModal.clienteNombre}</strong></p>
+                  <p className="flex justify-between"><span>Fecha/Hora:</span> <strong>{formatFechaCompleta(reciboModal.fechaHora)}</strong></p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" onClick={() => setReciboModal(null)}>
-                    Cerrar
-                  </Button>
-                  <Button
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-                    onClick={() => {
-                      const msg = encodeURIComponent(
-                        `*CrediGestor - Recibo de Pago*\n\nHola ${reciboModal.clienteNombre},\nRegistramos tu pago de *${formatMoneda(reciboModal.montoPagado, moneda)}*.\nSaldo pendiente: *${formatMoneda(reciboModal.saldoRestante, moneda)}*.\n\n¡Gracias por tu puntualidad!`
-                      );
-                      window.open(`https://wa.me/?text=${msg}`, "_blank");
-                      setReciboModal(null);
-                    }}
-                  >
-                    <Share2 size={15} /> WhatsApp
-                  </Button>
+                <div className="border-t border-b border-dashed border-slate-300 py-3 my-2 text-center">
+                  <p className="text-slate-500 text-[11px] mb-1">Monto Abonado</p>
+                  <p className="font-display text-3xl font-black text-emerald-600">{formatMoneda(reciboModal.montoPagado, moneda)}</p>
+                </div>
+
+                <div className="text-slate-700 space-y-1.5">
+                  <p className="flex justify-between items-center"><span className="text-slate-500">Nuevo Saldo:</span> <strong className="text-sm">{formatMoneda(reciboModal.saldoRestante, moneda)}</strong></p>
+                </div>
+
+                <div className="pt-3 text-center border-t border-slate-200 mt-3">
+                  <p className="text-[10px] text-slate-400">Este documento certifica su pago.</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-0.5">¡Gracias por su puntualidad!</p>
                 </div>
               </div>
+
+              <div className="grid grid-cols-3 gap-2 print:hidden">
+                <Button variant="outline" onClick={() => setReciboModal(null)} className="px-2">
+                  <X size={18} />
+                </Button>
+                <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold" onClick={() => window.print()}>
+                  <Printer size={15} /> Imprimir
+                </Button>
+                <Button
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                  onClick={() => {
+                    const msg = encodeURIComponent(
+                      `*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${reciboModal.clienteNombre}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${reciboModal.operacionId}\n*Crédito:* ${reciboModal.codigo}\n*Abono:* ${formatMoneda(reciboModal.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(reciboModal.saldoRestante, moneda)}\n*Fecha:* ${formatFechaCompleta(reciboModal.fechaHora)}\n\n¡Gracias por tu responsabilidad!`
+                    );
+                    window.open(`https://wa.me/?text=${msg}`, "_blank");
+                    setReciboModal(null);
+                  }}
+                >
+                  <Share2 size={15} /> Enviar
+                </Button>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </AppShell>
 
-      {/* DISEÑO EXCLUSIVO PARA IMPRESIÓN / PDF (Invisible en web) */}
-      <div className="hidden print:block bg-white text-black p-8 font-sans">
-        <div className="border-b-2 border-black pb-4 mb-6">
-          <h1 className="text-3xl font-black uppercase tracking-widest">CrediGestor</h1>
-          <p className="text-lg font-bold mt-1 text-gray-700">Hoja de Ruta de Cobranza Diaria</p>
-          <p className="text-sm mt-1 text-gray-500">Generado el: {formatFechaCompleta(new Date().toISOString())}</p>
-          <p className="text-sm font-bold text-gray-800 mt-2">
-            Filtro de Zona: {filtroZona === "TODAS" ? "Todos los Mercados" : filtroZona}
-          </p>
-        </div>
+      {/* HOJA DE RUTA IMPRIMIBLE (Solo se muestra si NO hay un recibo abierto) */}
+      {!reciboModal && (
+        <div className="hidden print:block bg-white text-black p-8 font-sans">
+          <div className="border-b-2 border-black pb-4 mb-6">
+            <h1 className="text-3xl font-black uppercase tracking-widest">CrediGestor</h1>
+            <p className="text-lg font-bold mt-1 text-gray-700">Hoja de Ruta de Cobranza Diaria</p>
+            <p className="text-sm mt-1 text-gray-500">Generado el: {formatFechaCompleta(new Date().toISOString())}</p>
+            <p className="text-sm font-bold text-gray-800 mt-2">
+              Filtro de Zona: {filtroZona === "TODAS" ? "Todos los Mercados" : filtroZona}
+            </p>
+          </div>
 
-        <table className="w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="bg-gray-100 border-b-2 border-gray-800">
-              <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cliente</th>
-              <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Puesto / Zona</th>
-              <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Crédito / Cuota</th>
-              <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Vencimiento</th>
-              <th className="py-3 px-2 font-bold uppercase text-xs text-right border border-gray-300">Total a Cobrar</th>
-              <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cobrado (Firma)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rutaFiltrada.map((r) => (
-              <tr key={r.cuotaId} className="border-b border-gray-300">
-                <td className="py-3 px-2 font-bold text-gray-900 border-x border-gray-300">{r.clienteNombre}</td>
-                <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.direccionPuesto || "—"}</td>
-                <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.codigoPrestamo} - #{r.numeroCuota}</td>
-                <td className="py-3 px-2 text-gray-700 border-x border-gray-300">
-                  {formatFecha(r.fechaVencimiento)} {r.vencida ? `(Mora)` : ""}
-                </td>
-                <td className="py-3 px-2 text-right font-black border-x border-gray-300 text-lg">
-                  {formatMoneda(r.totalPagar, moneda)}
-                </td>
-                <td className="py-3 px-2 border-x border-gray-300">
-                  <div className="w-full h-8 border-b border-dashed border-gray-400"></div>
-                </td>
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="bg-gray-100 border-b-2 border-gray-800">
+                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cliente</th>
+                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Puesto / Zona</th>
+                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Crédito / Cuota</th>
+                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Vencimiento</th>
+                <th className="py-3 px-2 font-bold uppercase text-xs text-right border border-gray-300">Total a Cobrar</th>
+                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cobrado (Firma)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rutaFiltrada.map((r) => (
+                <tr key={r.cuotaId} className="border-b border-gray-300">
+                  <td className="py-3 px-2 font-bold text-gray-900 border-x border-gray-300">{r.clienteNombre}</td>
+                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.direccionPuesto || "—"}</td>
+                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.codigoPrestamo} - #{r.numeroCuota}</td>
+                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">
+                    {formatFecha(r.fechaVencimiento)} {r.vencida ? `(Mora)` : ""}
+                  </td>
+                  <td className="py-3 px-2 text-right font-black border-x border-gray-300 text-lg">
+                    {formatMoneda(r.totalPagar, moneda)}
+                  </td>
+                  <td className="py-3 px-2 border-x border-gray-300">
+                    <div className="w-full h-8 border-b border-dashed border-gray-400"></div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-        <div className="mt-8 flex justify-between text-sm text-gray-600">
-          <p>Total de visitas agendadas: <strong>{rutaFiltrada.length}</strong></p>
-          <p>Proyectado a cobrar hoy: <strong>{formatMoneda(rutaFiltrada.reduce((acc, curr) => acc + curr.totalPagar, 0), moneda)}</strong></p>
+          <div className="mt-8 flex justify-between text-sm text-gray-600">
+            <p>Total de visitas agendadas: <strong>{rutaFiltrada.length}</strong></p>
+            <p>Proyectado a cobrar hoy: <strong>{formatMoneda(rutaFiltrada.reduce((acc, curr) => acc + curr.totalPagar, 0), moneda)}</strong></p>
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }
