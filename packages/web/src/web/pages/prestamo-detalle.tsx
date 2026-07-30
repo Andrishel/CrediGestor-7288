@@ -1,12 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { Printer, HandCoins, User, Receipt, Banknote, Smartphone } from "lucide-react";
+import { Printer, HandCoins, User, Receipt, Banknote, Smartphone, Share2, FileText, X } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner } from "../components/ui/primitives";
-import { PagoModal } from "../components/pago-modal";
-import { usePrestamo } from "../queries/prestamos";
-import { useConfigGeneral } from "../queries/config";
 import { formatMoneda, formatFecha, formatFechaCompleta, cn } from "../lib/utils";
+import { supabase } from "../lib/supabase";
+
+type Cuota = {
+  id: string;
+  numeroCuota: number;
+  fechaVencimiento: string;
+  montoCuota: number;
+  moraAcumulada: number;
+  estado: string;
+};
+
+type Pago = {
+  id: string;
+  montoPagado: number;
+  fechaPago: string;
+  metodoPago: string;
+  numeroOperacion?: string | null;
+  cuotaNumero?: number;
+};
+
+type PrestamoDetalle = {
+  id: string;
+  codigoPrestamo: string;
+  montoDesembolsado: number;
+  saldoPendiente: number;
+  interesPorcentaje: number;
+  frecuencia: string;
+  fechaDesembolso: string;
+  estado: string;
+};
+
+type ClienteSimple = {
+  id: string;
+  nombreCompleto: string;
+  telefono?: string;
+  dni?: string;
+};
 
 const CUOTA_ESTADO: Record<string, { label: string; color: "success" | "danger" | "warning" | "gray" }> = {
   pagado: { label: "Pagada", color: "success" },
@@ -18,25 +52,176 @@ const CUOTA_ESTADO: Record<string, { label: string; color: "success" | "danger" 
 export default function PrestamoDetallePage() {
   const [, params] = useRoute("/prestamos/:id");
   const id = params?.id ?? "";
-  const q = usePrestamo(id);
-  const general = useConfigGeneral();
-  const moneda = general.data?.moneda ?? "S/";
-  const [pagoOpen, setPagoOpen] = useState(false);
 
-  if (q.isLoading || !q.data) {
+  const [prestamo, setPrestamo] = useState<PrestamoDetalle | null>(null);
+  const [cliente, setCliente] = useState<ClienteSimple | null>(null);
+  const [cuotas, setCuotas] = useState<Cuota[]>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [registrandoPago, setRegistrandoPago] = useState(false);
+  const [pagoBoleta, setPagoBoleta] = useState<Pago | null>(null);
+
+  const moneda = "S/";
+
+  const cargarDetalle = async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const { data: pData, error: pErr } = await supabase
+        .from("prestamos")
+        .select(`
+          id,
+          codigo_prestamo,
+          monto_desembolsado,
+          saldo_pendiente,
+          interes_porcentaje,
+          frecuencia,
+          fecha_desembolso,
+          created_at,
+          estado,
+          cliente_id,
+          clientes ( id, nombre_completo, telefono, dni )
+        `)
+        .eq("id", id)
+        .single();
+
+      if (pErr || !pData) throw pErr || new Error("Préstamo no encontrado");
+
+      const pFormateado: PrestamoDetalle = {
+        id: pData.id,
+        codigoPrestamo: pData.codigo_prestamo || `PRES-${pData.id.substring(0, 6).toUpperCase()}`,
+        montoDesembolsado: Number(pData.monto_desembolsado || 0),
+        saldoPendiente: Number(pData.saldo_pendiente || 0),
+        interesPorcentaje: Number(pData.interes_porcentaje || 0),
+        frecuencia: (pData.frecuencia || "DIARIO").toLowerCase(),
+        fechaDesembolso: pData.fecha_desembolso || pData.created_at,
+        estado: (pData.estado || "ACTIVO").toLowerCase(),
+      };
+
+      setPrestamo(pFormateado);
+
+      const clienteInfo: any = Array.isArray(pData.clientes) ? pData.clientes[0] : pData.clientes;
+
+      if (clienteInfo) {
+        setCliente({
+          id: clienteInfo.id,
+          nombreCompleto: clienteInfo.nombre_completo || "Sin Nombre",
+          telefono: clienteInfo.telefono || "",
+          dni: clienteInfo.dni || "",
+        });
+      }
+
+      const { data: cuData, error: cuErr } = await supabase
+        .from("cuotas")
+        .select("*")
+        .eq("prestamo_id", id)
+        .order("numero_cuota", { ascending: true });
+
+      if (!cuErr && cuData) {
+        setCuotas(
+          cuData.map((c) => ({
+            id: c.id,
+            numeroCuota: c.numero_cuota,
+            fechaVencimiento: c.fecha_vencimiento,
+            montoCuota: Number(c.monto_cuota || 0),
+            moraAcumulada: Number(c.mora_acumulada || 0),
+            estado: (c.estado || "PENDIENTE").toLowerCase(),
+          }))
+        );
+      }
+
+      const { data: pgData, error: pgErr } = await supabase
+        .from("pagos")
+        .select("id, monto_pagado, metodo_pago, numero_operacion, fecha_pago")
+        .eq("prestamo_id", id);
+
+      if (!pgErr && pgData) {
+        setPagos(
+          pgData.map((pg: any, index: number) => ({
+            id: pg.id,
+            montoPagado: Number(pg.monto_pagado || 0),
+            fechaPago: pg.fecha_pago || new Date().toISOString(),
+            metodoPago: pg.metodo_pago || "EFECTIVO",
+            numeroOperacion: pg.numero_operacion || null,
+            cuotaNumero: index + 1,
+          }))
+        );
+      }
+    } catch (err: any) {
+      console.error("Error al cargar detalle:", err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarDetalle();
+  }, [id]);
+
+  const registrarPagoCuota = async () => {
+    if (!prestamo) return;
+
+    const cuotaPendiente = cuotas.find((c) => c.estado !== "pagado");
+    if (!cuotaPendiente) {
+      alert("Todas las cuotas de este préstamo ya están pagadas.");
+      return;
+    }
+
+    const montoPago = cuotaPendiente.montoCuota;
+    const nuevoSaldo = Math.max(0, prestamo.saldoPendiente - montoPago);
+    const estaCompletado = nuevoSaldo === 0;
+
+    setRegistrandoPago(true);
+    try {
+      const { error: pErr } = await supabase.from("pagos").insert([
+        {
+          prestamo_id: prestamo.id,
+          cuota_id: cuotaPendiente.id,
+          monto_pagado: montoPago,
+          metodo_pago: "EFECTIVO",
+          fecha_pago: new Date().toISOString(),
+        },
+      ]);
+      if (pErr) throw pErr;
+
+      const { error: cErr } = await supabase
+        .from("cuotas")
+        .update({ estado: "PAGADO" })
+        .eq("id", cuotaPendiente.id);
+      if (cErr) throw cErr;
+
+      const { error: prErr } = await supabase
+        .from("prestamos")
+        .update({
+          saldo_pendiente: nuevoSaldo,
+          estado: estaCompletado ? "CANCELADO" : "ACTIVO",
+        })
+        .eq("id", prestamo.id);
+      if (prErr) throw prErr;
+
+      await cargarDetalle();
+    } catch (err: any) {
+      alert("Error al registrar el pago: " + err.message);
+    } finally {
+      setRegistrandoPago(false);
+    }
+  };
+
+  if (loading || !prestamo) {
     return (
       <AppShell hideNav header={<PageHeader title="Préstamo" back="/prestamos" />}>
-        <div className="flex justify-center py-16 text-brand"><Spinner size={28} /></div>
+        <div className="flex justify-center py-16 text-emerald-600"><Spinner size={28} /></div>
       </AppShell>
     );
   }
 
-  const { prestamo: p, cliente, cuotas, pagos } = q.data;
+  const p = prestamo;
   const pagadas = cuotas.filter((c) => c.estado === "pagado").length;
   const pct = cuotas.length > 0 ? Math.round((pagadas / cuotas.length) * 100) : 0;
   const totalPagar = cuotas.reduce((s, c) => s + c.montoCuota, 0);
   const totalMora = cuotas.reduce((s, c) => s + c.moraAcumulada, 0);
   const cancelado = p.estado === "cancelado";
+  const siguienteCuota = cuotas.find((c) => c.estado !== "pagado");
 
   return (
     <AppShell
@@ -47,126 +232,207 @@ export default function PrestamoDetallePage() {
           subtitle={cliente?.nombreCompleto}
           back="/prestamos"
           right={
-            <button onClick={() => window.print()} className="rounded-lg p-2 text-brand hover:bg-gray-100" aria-label="Imprimir">
+            <button onClick={() => window.print()} className="rounded-lg p-2 text-slate-300 hover:bg-slate-800 hover:text-white transition" aria-label="Imprimir">
               <Printer size={18} />
             </button>
           }
         />
       }
     >
-      {/* Resumen */}
-      <div className="mb-4 rounded-2xl bg-brand p-4 text-white">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-white/70">Saldo pendiente</p>
-            <p className="tnum font-display text-3xl font-bold">{formatMoneda(p.saldoPendiente, moneda)}</p>
+      <div className="space-y-6 max-w-4xl mx-auto">
+        {/* Resumen */}
+        <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-400">Saldo pendiente</p>
+              <p className="tnum font-display text-3xl font-black text-emerald-400">{formatMoneda(p.saldoPendiente, moneda)}</p>
+            </div>
+            <Badge color={cancelado ? "success" : p.estado === "judicial" ? "danger" : "accent"}>
+              {cancelado ? "Cancelado" : p.estado === "judicial" ? "Judicial" : "Activo"}
+            </Badge>
           </div>
-          <Badge color={cancelado ? "success" : p.estado === "judicial" ? "danger" : "accent"}>
-            {cancelado ? "Cancelado" : p.estado === "judicial" ? "Judicial" : "Activo"}
-          </Badge>
+          <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-slate-400 font-medium">{pagadas}/{cuotas.length} cuotas pagadas ({pct}%)</p>
         </div>
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/20">
-          <div className="h-full rounded-full bg-success transition-all" style={{ width: `${pct}%` }} />
+
+        {/* Datos */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <DatoCard label="Monto desembolsado" valor={formatMoneda(p.montoDesembolsado, moneda)} />
+          <DatoCard label="Total a pagar" valor={formatMoneda(totalPagar, moneda)} />
+          <DatoCard label="Interés" valor={`${p.interesPorcentaje}%`} />
+          <DatoCard label="Frecuencia" valor={p.frecuencia} capitalize />
+          <DatoCard label="Desembolso" valor={formatFecha(p.fechaDesembolso)} />
+          <DatoCard label="Mora acumulada" valor={formatMoneda(totalMora, moneda)} alerta={totalMora > 0} />
         </div>
-        <p className="mt-1.5 text-xs text-white/70">{pagadas}/{cuotas.length} cuotas pagadas ({pct}%)</p>
-      </div>
 
-      {/* Datos */}
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <DatoCard label="Monto desembolsado" valor={formatMoneda(p.montoDesembolsado, moneda)} />
-        <DatoCard label="Total a pagar" valor={formatMoneda(totalPagar, moneda)} />
-        <DatoCard label="Interés" valor={`${p.interesPorcentaje}%`} />
-        <DatoCard label="Frecuencia" valor={p.frecuencia} capitalize />
-        <DatoCard label="Desembolso" valor={formatFecha(p.fechaDesembolso)} />
-        <DatoCard label="Mora acumulada" valor={formatMoneda(totalMora, moneda)} alerta={totalMora > 0} />
-      </div>
+        {cliente && (
+          <div className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2">
+              <User size={18} className="text-emerald-600" />
+              <span className="font-bold text-slate-900">{cliente.nombreCompleto}</span>
+            </div>
+            <Link to={`/clientes/${cliente.id}`} className="text-xs font-semibold text-emerald-600 hover:underline">
+              Ver ficha cliente →
+            </Link>
+          </div>
+        )}
 
-      {cliente && (
-        <Link to={`/clientes/${cliente.id}`} className="mb-4 flex items-center gap-2 rounded-xl border border-line bg-white p-3 text-sm">
-          <User size={16} className="text-brand" />
-          <span className="flex-1 font-medium text-ink">{cliente.nombreCompleto}</span>
-          <span className="text-xs text-accent">Ver cliente</span>
-        </Link>
-      )}
+        {!cancelado && (
+          <Button variant="success" className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md" loading={registrandoPago} onClick={registrarPagoCuota}>
+            <HandCoins size={18} /> Registrar cobro cuota ({formatMoneda(siguienteCuota?.montoCuota || 0, moneda)})
+          </Button>
+        )}
 
-      {!cancelado && (
-        <Button variant="success" className="mb-5 w-full py-3" onClick={() => setPagoOpen(true)}>
-          <HandCoins size={18} /> Registrar pago
-        </Button>
-      )}
-
-      {/* Cronograma */}
-      <h2 className="mb-2 font-display text-base font-semibold text-ink">Cronograma de cuotas</h2>
-      <div className="mb-5 overflow-hidden rounded-2xl border border-line bg-white">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-surface text-ink-soft">
-            <tr>
-              <th className="px-3 py-2.5 font-medium">#</th>
-              <th className="px-3 py-2.5 font-medium">Vencimiento</th>
-              <th className="px-3 py-2.5 text-right font-medium">Monto</th>
-              <th className="px-3 py-2.5 text-right font-medium">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cuotas.map((c) => {
-              const est = CUOTA_ESTADO[c.estado] ?? CUOTA_ESTADO.pendiente;
-              return (
-                <tr key={c.id} className="border-t border-line/60">
-                  <td className="px-3 py-2.5 font-medium text-ink">{c.numeroCuota}</td>
-                  <td className="px-3 py-2.5 text-ink-soft">{formatFecha(c.fechaVencimiento)}</td>
-                  <td className="tnum px-3 py-2.5 text-right text-ink">
-                    {formatMoneda(c.montoCuota, moneda)}
-                    {c.moraAcumulada > 0 && <span className="block text-[10px] text-danger">+{formatMoneda(c.moraAcumulada, moneda)}</span>}
-                  </td>
-                  <td className="px-3 py-2.5 text-right"><Badge color={est.color}>{est.label}</Badge></td>
+        {/* Cronograma */}
+        <div className="space-y-3">
+          <h2 className="font-display text-base font-bold text-slate-900">Cronograma de cuotas</h2>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">Vencimiento</th>
+                  <th className="px-4 py-3 text-right font-semibold">Monto</th>
+                  <th className="px-4 py-3 text-right font-semibold">Estado</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {cuotas.map((c) => {
+                  const est = CUOTA_ESTADO[c.estado] ?? CUOTA_ESTADO.pendiente;
+                  return (
+                    <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-bold text-slate-900">{c.numeroCuota}</td>
+                      <td className="px-4 py-3 text-slate-600">{formatFecha(c.fechaVencimiento)}</td>
+                      <td className="tnum px-4 py-3 text-right font-bold text-slate-900">
+                        {formatMoneda(c.montoCuota, moneda)}
+                        {c.moraAcumulada > 0 && <span className="block text-[10px] text-red-600">+{formatMoneda(c.moraAcumulada, moneda)}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right"><Badge color={est.color}>{est.label}</Badge></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Historial de pagos */}
+        <div className="space-y-3">
+          <h2 className="flex items-center gap-2 font-display text-base font-bold text-slate-900">
+            <Receipt size={18} className="text-emerald-600" /> Historial de pagos
+          </h2>
+          {pagos.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-xs text-slate-500">
+              Aún no se han registrado pagos para este préstamo.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {pagos.map((pg) => {
+                const Icon = pg.metodoPago === "EFECTIVO" ? Banknote : Smartphone;
+                return (
+                  <div key={pg.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800">
+                        <Icon size={18} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900">{formatMoneda(pg.montoPagado, moneda)}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {formatFechaCompleta(pg.fechaPago)} · {pg.metodoPago}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Badge color="success">Pagado</Badge>
+                      {/* Botón Imprimir / PDF */}
+                      <button
+                        onClick={() => setPagoBoleta(pg)}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 hover:bg-slate-100 transition"
+                        title="Ver / Imprimir Boleta PDF"
+                      >
+                        <FileText size={16} />
+                      </button>
+                      {/* Botón WhatsApp */}
+                      <button
+                        onClick={() => {
+                          const msg = encodeURIComponent(
+                            `*CrediGestor - Recibo de Pago*\n\nHola ${cliente?.nombreCompleto || "Cliente"},\nRegistramos tu pago de *${formatMoneda(pg.montoPagado, moneda)}* para el préstamo *${p.codigoPrestamo}*.\nSaldo pendiente actual: *${formatMoneda(p.saldoPendiente, moneda)}*.\n\n¡Gracias por tu responsabilidad!`
+                          );
+                          window.open(`https://wa.me/${cliente?.telefono ? `51${cliente.telefono}` : ""}?text=${msg}`, "_blank");
+                        }}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition"
+                        title="Enviar por WhatsApp"
+                      >
+                        <Share2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Historial de pagos */}
-      <h2 className="mb-2 flex items-center gap-2 font-display text-base font-semibold text-ink">
-        <Receipt size={18} className="text-brand" /> Historial de pagos
-      </h2>
-      {pagos.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line bg-white px-4 py-6 text-center text-sm text-ink-soft">
-          Aún no se han registrado pagos.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {pagos.map((pg) => {
-            const Icon = pg.metodoPago === "EFECTIVO" ? Banknote : Smartphone;
-            return (
-              <div key={pg.id} className="flex items-center gap-3 rounded-xl border border-line bg-white p-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-success-soft text-success">
-                  <Icon size={16} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-ink">{formatMoneda(pg.montoPagado, moneda)}</p>
-                  <p className="truncate text-xs text-ink-soft">
-                    {formatFechaCompleta(pg.fechaPago)} · {pg.metodoPago}
-                    {pg.numeroOperacion ? ` · Op. ${pg.numeroOperacion}` : ""}
-                  </p>
-                </div>
-                <Badge color="success">Pagado</Badge>
+      {/* Modal Boleta para PDF / Impresión */}
+      {pagoBoleta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <span className="font-display text-sm font-bold text-slate-900">Comprobante de Pago</span>
+              <button onClick={() => setPagoBoleta(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Formato Ticket */}
+            <div id="ticket-print" className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center text-xs space-y-3">
+              <div className="border-b border-slate-200 pb-2">
+                <h2 className="font-display text-lg font-black text-slate-900">CrediGestor</h2>
+                <p className="text-[10px] text-slate-500 uppercase">Boleta de Cobro</p>
               </div>
-            );
-          })}
+
+              <div className="space-y-1.5 text-left text-slate-700">
+                <p className="flex justify-between"><span>Código:</span> <strong>{p.codigoPrestamo}</strong></p>
+                <p className="flex justify-between"><span>Cliente:</span> <strong className="truncate max-w-[150px]">{cliente?.nombreCompleto}</strong></p>
+                <p className="flex justify-between"><span>DNI:</span> <strong>{cliente?.dni || "—"}</strong></p>
+                <p className="flex justify-between"><span>Fecha:</span> <strong>{formatFecha(pagoBoleta.fechaPago)}</strong></p>
+                <p className="flex justify-between"><span>Método:</span> <strong>{pagoBoleta.metodoPago}</strong></p>
+              </div>
+
+              <div className="border-t border-b border-dashed border-slate-300 py-3 my-2">
+                <p className="text-slate-500">Monto Abonado</p>
+                <p className="font-display text-2xl font-black text-emerald-600">{formatMoneda(pagoBoleta.montoPagado, moneda)}</p>
+              </div>
+
+              <div className="text-left text-slate-700">
+                <p className="flex justify-between"><span>Saldo Restante:</span> <strong>{formatMoneda(p.saldoPendiente, moneda)}</strong></p>
+              </div>
+
+              <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-200">¡Gracias por su puntualidad!</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setPagoBoleta(null)}>Cerrar</Button>
+              <Button className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" onClick={() => window.print()}>
+                <Printer size={15} /> Imprimir / PDF
+              </Button>
+            </div>
+          </div>
         </div>
       )}
-
-      <PagoModal open={pagoOpen} onClose={() => setPagoOpen(false)} prestamoId={id} onSuccess={() => q.refetch()} />
     </AppShell>
   );
 }
 
 function DatoCard({ label, valor, capitalize = false, alerta = false }: { label: string; valor: string; capitalize?: boolean; alerta?: boolean }) {
   return (
-    <div className={cn("rounded-xl border border-line bg-white p-3", alerta && "border-danger/30 bg-danger-soft")}>
-      <p className="text-xs text-ink-soft">{label}</p>
-      <p className={cn("tnum text-sm font-bold text-ink", capitalize && "capitalize")}>{valor}</p>
+    <div className={cn("rounded-2xl border border-slate-200 bg-white p-4 shadow-sm", alerta && "border-red-200 bg-red-50/40")}>
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={cn("tnum text-sm font-bold text-slate-900 mt-0.5", capitalize && "capitalize")}>{valor}</p>
     </div>
   );
 }

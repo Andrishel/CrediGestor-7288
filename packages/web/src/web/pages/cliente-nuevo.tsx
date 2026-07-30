@@ -3,8 +3,8 @@ import { useLocation, useRoute } from "wouter";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
-import { useCreateCliente, useUpdateCliente, useCliente } from "../queries/clientes";
 import { validarDNI, validarTelefono } from "../lib/utils";
+import { supabase } from "../lib/supabase";
 
 type Form = {
   nombreCompleto: string;
@@ -28,27 +28,33 @@ export default function ClienteNuevoPage() {
   const [, navigate] = useLocation();
   const [matchEdit, params] = useRoute("/clientes/:id/editar");
   const editId = matchEdit ? params?.id : undefined;
-  const existente = useCliente(editId ?? "");
   const showToast = useToast();
-  const crear = useCreateCliente();
-  const actualizar = useUpdateCliente();
 
   const [form, setForm] = useState<Form>(vacio);
   const [inicializado, setInicializado] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [errores, setErrores] = useState<Partial<Record<keyof Form, string>>>({});
 
-  // Precargar en modo edición
-  if (editId && existente.data && !inicializado) {
-    const c = existente.data.cliente;
-    setForm({
-      nombreCompleto: c.nombreCompleto,
-      dni: c.dni,
-      telefono: c.telefono ?? "",
-      direccionPuestoMercado: c.direccionPuestoMercado ?? "",
-      numeroPuesto: c.numeroPuesto ?? "",
-      notas: c.notas ?? "",
-    });
+  // Precargar en modo edición desde Supabase
+  if (editId && !inicializado) {
     setInicializado(true);
+    supabase
+      .from("clientes")
+      .select("*")
+      .eq("id", editId)
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setForm({
+            nombreCompleto: data.nombre_completo || "",
+            dni: data.dni || "",
+            telefono: data.telefono || "",
+            direccionPuestoMercado: data.direccion_puesto || "",
+            numeroPuesto: "",
+            notas: "",
+          });
+        }
+      });
   }
 
   const set = (k: keyof Form, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -65,26 +71,48 @@ export default function ClienteNuevoPage() {
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!validar()) return;
+
+    setLoading(true);
+
+    // Mapeo exacto con los nombres de columna del script SQL de Supabase
     const payload = {
-      nombreCompleto: form.nombreCompleto.trim(),
+      nombre_completo: form.nombreCompleto.trim(),
       dni: form.dni.trim(),
       telefono: form.telefono.trim() || null,
-      direccionPuestoMercado: form.direccionPuestoMercado.trim() || null,
-      numeroPuesto: form.numeroPuesto.trim() || null,
-      notas: form.notas.trim() || null,
+      direccion_puesto: [form.direccionPuestoMercado.trim(), form.numeroPuesto.trim()]
+        .filter(Boolean)
+        .join(" - ") || null,
+      historial_score: 100,
+      estado: "ACTIVO",
     };
+
     try {
       if (editId) {
-        await actualizar.mutateAsync({ id: editId, ...payload });
+        const { error } = await supabase
+          .from("clientes")
+          .update(payload)
+          .eq("id", editId);
+
+        if (error) throw error;
+
         showToast("Cliente actualizado", "success");
         navigate(`/clientes/${editId}`);
       } else {
-        const nuevo = await crear.mutateAsync(payload);
+        const { data, error } = await supabase
+          .from("clientes")
+          .insert([payload])
+          .select("id")
+          .single();
+
+        if (error) throw error;
+
         showToast("Cliente registrado", "success");
-        navigate(`/clientes/${nuevo.id}`);
+        navigate(`/clientes/${data.id}`);
       }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Error al guardar", "error");
+    } catch (err: any) {
+      showToast(err?.message || "Error al guardar cliente en Supabase", "error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -117,7 +145,7 @@ export default function ClienteNuevoPage() {
           <Button type="button" variant="outline" className="flex-1" onClick={() => navigate(editId ? `/clientes/${editId}` : "/clientes")}>
             Cancelar
           </Button>
-          <Button type="submit" className="flex-1" loading={crear.isPending || actualizar.isPending}>
+          <Button type="submit" className="flex-1" loading={loading}>
             {editId ? "Guardar cambios" : "Registrar cliente"}
           </Button>
         </div>

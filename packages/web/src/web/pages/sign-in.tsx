@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { Redirect } from "wouter";
+import { useLocation } from "wouter";
 import { Mail, Lock, Calculator, Eye, EyeOff } from "lucide-react";
-import { authClient, captureToken } from "../lib/auth";
 import { Button, Field, inputClass } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
 import { cn } from "../lib/utils";
+import { supabase } from "../lib/supabase";
 
 export default function SignInPage() {
-  const { data: session, isPending } = authClient.useSession();
+  const [, navigate] = useLocation();
   const showToast = useToast();
   const [modo, setModo] = useState<"login" | "registro">("login");
   const [nombre, setNombre] = useState("");
@@ -16,8 +16,6 @@ export default function SignInPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errores, setErrores] = useState<{ email?: string; password?: string; nombre?: string; general?: string }>({});
-
-  if (!isPending && session) return <Redirect to="/" />;
 
   const validar = () => {
     const e: typeof errores = {};
@@ -37,21 +35,27 @@ export default function SignInPage() {
     setErrores({});
     try {
       if (modo === "registro") {
-        const { error } = await authClient.signUp.email(
-          { name: nombre.trim(), email, password },
-          { onSuccess: captureToken },
-        );
-        if (error) throw new Error(error.message || "No se pudo crear la cuenta");
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: nombre.trim() },
+          },
+        });
+        if (error) throw error;
         showToast("Cuenta creada con éxito", "success");
+        navigate("/");
       } else {
-        const { error } = await authClient.signIn.email(
-          { email, password },
-          { onSuccess: captureToken },
-        );
-        if (error) throw new Error(error.message || "Credenciales incorrectas");
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        showToast("Sesión iniciada", "success");
+        navigate("/");
       }
-    } catch (err) {
-      setErrores({ general: err instanceof Error ? err.message : "Ocurrió un error" });
+    } catch (err: any) {
+      setErrores({ general: err?.message || "Ocurrió un error al autenticar" });
     } finally {
       setLoading(false);
     }
@@ -133,7 +137,7 @@ export default function SignInPage() {
             </Field>
 
             {errores.general && (
-              <div className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm font-medium text-red-700">
+              <div className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700 border border-red-200">
                 {errores.general}
               </div>
             )}

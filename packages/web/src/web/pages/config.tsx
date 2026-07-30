@@ -3,13 +3,6 @@ import { Settings, Wallet, UploadCloud, QrCode } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass, Spinner } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
-import {
-  useConfigGeneral,
-  useUpdateConfigGeneral,
-  useConfigCobro,
-  useUpdateConfigCobro,
-} from "../queries/config";
-import { uploadFile } from "../lib/upload";
 import { cn } from "../lib/utils";
 
 type Tab = "general" | "cobro";
@@ -21,10 +14,12 @@ export default function ConfigPage() {
   return (
     <AppShell header={<PageHeader title="Configuración" subtitle="Ajusta las reglas del negocio" />}>
       <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-white p-1">
-        {([
-          { id: "general", label: "General", icon: Settings },
-          { id: "cobro", label: "Cobro", icon: Wallet },
-        ] as const).map((t) => {
+        {(
+          [
+            { id: "general", label: "General", icon: Settings },
+            { id: "cobro", label: "Cobro", icon: Wallet },
+          ] as const
+        ).map((t) => {
           const Icon = t.icon;
           return (
             <button
@@ -48,17 +43,40 @@ export default function ConfigPage() {
 const FRECS: Frec[] = ["diario", "semanal", "mensual"];
 const METODOS: Metodo[] = ["EFECTIVO", "YAPE", "PLIN"];
 
+const defaultConfigGeneral = {
+  nombreEmpresa: "CrediGestor",
+  moneda: "S/",
+  tasaInteresDefault: 10,
+  moraDiariaPorcentaje: 0.5,
+  diasGraciaMora: 2,
+  montoMinimoPrestamo: 100,
+  montoMaximoPrestamo: 10000,
+  plazoMaximoCuotas: 30,
+  frecuenciasPermitidas: ["diario", "semanal", "mensual"] as Frec[],
+  metodosPagoActivos: ["EFECTIVO", "YAPE", "PLIN"] as Metodo[],
+  diasRecordatorioVencimiento: 1,
+  scoreMinimoAprobacion: 50,
+};
+
 function GeneralForm() {
-  const q = useConfigGeneral();
-  const update = useUpdateConfigGeneral();
   const showToast = useToast();
   const [f, setF] = useState<Record<string, unknown> | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (q.data && !f) setF({ ...q.data });
-  }, [q.data, f]);
+    const saved = localStorage.getItem("cg_config_general");
+    if (saved) {
+      try {
+        setF(JSON.parse(saved));
+      } catch {
+        setF(defaultConfigGeneral);
+      }
+    } else {
+      setF(defaultConfigGeneral);
+    }
+  }, []);
 
-  if (q.isLoading || !f) return <div className="flex justify-center py-16 text-brand"><Spinner size={26} /></div>;
+  if (!f) return <div className="flex justify-center py-16 text-brand"><Spinner size={26} /></div>;
 
   const set = (k: string, v: unknown) => setF((s) => ({ ...(s as object), [k]: v }));
   const num = (k: string) => Number((f as Record<string, unknown>)[k]) || 0;
@@ -76,24 +94,15 @@ function GeneralForm() {
     }
     if (arr("frecuenciasPermitidas").length === 0) return showToast("Selecciona al menos una frecuencia", "warning");
     if (arr("metodosPagoActivos").length === 0) return showToast("Selecciona al menos un método de pago", "warning");
+
+    setSaving(true);
     try {
-      await update.mutateAsync({
-        nombreEmpresa: str("nombreEmpresa"),
-        moneda: str("moneda"),
-        tasaInteresDefault: num("tasaInteresDefault"),
-        moraDiariaPorcentaje: num("moraDiariaPorcentaje"),
-        diasGraciaMora: num("diasGraciaMora"),
-        montoMinimoPrestamo: num("montoMinimoPrestamo"),
-        montoMaximoPrestamo: num("montoMaximoPrestamo"),
-        plazoMaximoCuotas: num("plazoMaximoCuotas"),
-        frecuenciasPermitidas: arr("frecuenciasPermitidas") as Frec[],
-        metodosPagoActivos: arr("metodosPagoActivos") as Metodo[],
-        diasRecordatorioVencimiento: num("diasRecordatorioVencimiento"),
-        scoreMinimoAprobacion: num("scoreMinimoAprobacion"),
-      });
-      showToast("Configuración guardada", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Error al guardar", "error");
+      localStorage.setItem("cg_config_general", JSON.stringify(f));
+      showToast("Configuración guardada con éxito", "success");
+    } catch (err: any) {
+      showToast(err?.message || "Error al guardar", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -162,7 +171,7 @@ function GeneralForm() {
         </div>
       </Section>
 
-      <Button className="w-full py-3" loading={update.isPending} onClick={guardar}>
+      <Button className="w-full py-3" loading={saving} onClick={guardar}>
         Guardar cambios
       </Button>
     </div>
@@ -170,66 +179,63 @@ function GeneralForm() {
 }
 
 function CobroForm() {
-  const q = useConfigCobro();
-  const update = useUpdateConfigCobro();
   const showToast = useToast();
   const [numeroYape, setNumeroYape] = useState("");
   const [numeroPlin, setNumeroPlin] = useState("");
   const [titularYape, setTitularYape] = useState("");
   const [titularPlin, setTitularPlin] = useState("");
-  const [keyYape, setKeyYape] = useState<string | null>(null);
-  const [keyPlin, setKeyPlin] = useState<string | null>(null);
   const [previewYape, setPreviewYape] = useState<string | null>(null);
   const [previewPlin, setPreviewPlin] = useState<string | null>(null);
-  const [subiendo, setSubiendo] = useState<"yape" | "plin" | null>(null);
-  const [init, setInit] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (q.data && !init) {
-      setNumeroYape(q.data.numeroYape ?? "");
-      setNumeroPlin(q.data.numeroPlin ?? "");
-      setTitularYape(q.data.nombresTitularYape ?? "");
-      setTitularPlin(q.data.nombresTitularPlin ?? "");
-      setKeyYape(q.data.keyQrYape ?? null);
-      setKeyPlin(q.data.keyQrPlin ?? null);
-      setPreviewYape(q.data.urlQrYape ?? null);
-      setPreviewPlin(q.data.urlQrPlin ?? null);
-      setInit(true);
+    const saved = localStorage.getItem("cg_config_cobro");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setNumeroYape(parsed.numeroYape || "");
+        setNumeroPlin(parsed.numeroPlin || "");
+        setTitularYape(parsed.titularYape || "");
+        setTitularPlin(parsed.titularPlin || "");
+        setPreviewYape(parsed.previewYape || null);
+        setPreviewPlin(parsed.previewPlin || null);
+      } catch {
+        // usar vacíos
+      }
     }
-  }, [q.data, init]);
+  }, []);
 
-  if (q.isLoading) return <div className="flex justify-center py-16 text-brand"><Spinner size={26} /></div>;
-
-  const subir = async (e: React.ChangeEvent<HTMLInputElement>, tipo: "yape" | "plin") => {
+  const subir = (e: React.ChangeEvent<HTMLInputElement>, tipo: "yape" | "plin") => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    tipo === "yape" ? setPreviewYape(url) : setPreviewPlin(url);
-    setSubiendo(tipo);
-    try {
-      const key = await uploadFile(file, "qr-pagos");
-      tipo === "yape" ? setKeyYape(key) : setKeyPlin(key);
-      showToast("QR subido", "success");
-    } catch {
-      showToast("Error al subir el QR", "error");
-    } finally {
-      setSubiendo(null);
-    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      if (tipo === "yape") setPreviewYape(base64);
+      else setPreviewPlin(base64);
+      showToast("QR cargado", "success");
+    };
+    reader.readAsDataURL(file);
   };
 
   const guardar = async () => {
+    setSaving(true);
     try {
-      await update.mutateAsync({
-        numeroYape: numeroYape.trim() || null,
-        numeroPlin: numeroPlin.trim() || null,
-        nombresTitularYape: titularYape.trim() || null,
-        nombresTitularPlin: titularPlin.trim() || null,
-        urlQrYape: keyYape,
-        urlQrPlin: keyPlin,
-      });
+      const data = {
+        numeroYape: numeroYape.trim(),
+        numeroPlin: numeroPlin.trim(),
+        titularYape: titularYape.trim(),
+        titularPlin: titularPlin.trim(),
+        previewYape,
+        previewPlin,
+      };
+      localStorage.setItem("cg_config_cobro", JSON.stringify(data));
       showToast("Datos de cobro guardados", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Error al guardar", "error");
+    } catch (err: any) {
+      showToast(err?.message || "Error al guardar", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -242,7 +248,7 @@ function CobroForm() {
         <Field label="Titular de la cuenta">
           <input className={inputClass} value={titularYape} onChange={(e) => setTitularYape(e.target.value)} placeholder="Nombre del titular" />
         </Field>
-        <QrUploader label="QR de Yape" preview={previewYape} subiendo={subiendo === "yape"} onChange={(e) => subir(e, "yape")} />
+        <QrUploader label="QR de Yape" preview={previewYape} subiendo={false} onChange={(e) => subir(e, "yape")} />
       </Section>
 
       <Section titulo="Plin">
@@ -252,10 +258,10 @@ function CobroForm() {
         <Field label="Titular de la cuenta">
           <input className={inputClass} value={titularPlin} onChange={(e) => setTitularPlin(e.target.value)} placeholder="Nombre del titular" />
         </Field>
-        <QrUploader label="QR de Plin" preview={previewPlin} subiendo={subiendo === "plin"} onChange={(e) => subir(e, "plin")} />
+        <QrUploader label="QR de Plin" preview={previewPlin} subiendo={false} onChange={(e) => subir(e, "plin")} />
       </Section>
 
-      <Button className="w-full py-3" loading={update.isPending} onClick={guardar}>
+      <Button className="w-full py-3" loading={saving} onClick={guardar}>
         Guardar datos de cobro
       </Button>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import {
   Pencil,
@@ -12,11 +12,45 @@ import {
 } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner, EmptyState } from "../components/ui/primitives";
-import { useCliente } from "../queries/clientes";
-import { useConfigGeneral } from "../queries/config";
 import { formatMoneda, formatFecha, iniciales, scoreColor, scoreBg, cn } from "../lib/utils";
+import { supabase } from "../lib/supabase";
 
 type Tab = "creditos" | "domicilio" | "negocio" | "cliente";
+
+type Cuota = {
+  id: string;
+  numeroCuota: number;
+  fechaVencimiento: string;
+  montoCuota: number;
+  moraAcumulada: number;
+  estado: string;
+};
+
+type Prestamo = {
+  id: string;
+  codigoPrestamo: string;
+  montoDesembolsado: number;
+  saldoPendiente: number;
+  estado: string;
+  cuotas: Cuota[];
+};
+
+type ClienteDetalle = {
+  nombreCompleto: string;
+  dni: string;
+  telefono: string | null;
+  direccionPuestoMercado: string | null;
+  numeroPuesto: string | null;
+  notas: string | null;
+  historialCrediticioScore: number;
+  estado: string;
+};
+
+type Stats = {
+  totalPrestamos: number;
+  prestamosActivos: number;
+  tasaPuntual: number;
+};
 
 const CUOTA_ESTADO: Record<string, { label: string; color: "success" | "danger" | "warning" | "gray" }> = {
   pagado: { label: "Pagada", color: "success" },
@@ -29,21 +63,136 @@ export default function ClienteDetallePage() {
   const [, navigate] = useLocation();
   const [, params] = useRoute("/clientes/:id");
   const id = params?.id ?? "";
-  const q = useCliente(id);
-  const general = useConfigGeneral();
-  const moneda = general.data?.moneda ?? "S/";
+
+  const [cliente, setCliente] = useState<ClienteDetalle | null>(null);
+  const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  const [stats, setStats] = useState<Stats>({ totalPrestamos: 0, prestamosActivos: 0, tasaPuntual: 100 });
+  const [loading, setLoading] = useState(true);
+
+  const moneda = "S/";
   const [tab, setTab] = useState<Tab>("creditos");
   const [abierto, setAbierto] = useState<string | null>(null);
 
-  if (q.isLoading || !q.data) {
+  const cargarDatos = async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      // 1. Cargar Cliente
+      const { data: cData, error: cErr } = await supabase
+        .from("clientes")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (cErr || !cData) throw cErr || new Error("Cliente no encontrado");
+
+      let dir = cData.direccion_puesto || "";
+      let puesto = null;
+      if (dir.includes(" - ")) {
+        const partes = dir.split(" - ");
+        dir = partes[0];
+        puesto = partes[1];
+      }
+
+      setCliente({
+        nombreCompleto: cData.nombre_completo || "",
+        dni: cData.dni || "",
+        telefono: cData.telefono || null,
+        direccionPuestoMercado: dir || null,
+        numeroPuesto: puesto,
+        notas: null,
+        historialCrediticioScore: cData.historial_score ?? 100,
+        estado: (cData.estado || "ACTIVO").toLowerCase(),
+      });
+
+      // 2. Cargar Préstamos del Cliente
+      const { data: pData, error: pErr } = await supabase
+        .from("prestamos")
+        .select("*")
+        .eq("cliente_id", id)
+        .order("created_at", { ascending: false });
+
+      if (pErr) throw pErr;
+
+      const pIds = (pData || []).map((p) => p.id);
+      let cuotasMap: Record<string, Cuota[]> = {};
+
+      // 3. Cargar Cuotas si existen préstamos
+      if (pIds.length > 0) {
+        const { data: cuData, error: cuErr } = await supabase
+          .from("cuotas")
+          .select("*")
+          .in("prestamo_id", pIds)
+          .order("numero_cuota", { ascending: true });
+
+        if (!cuErr && cuData) {
+          cuData.forEach((cu) => {
+            if (!cuotasMap[cu.prestamo_id]) cuotasMap[cu.prestamo_id] = [];
+            cuotasMap[cu.prestamo_id].push({
+              id: cu.id,
+              numeroCuota: cu.numero_cuota,
+              fechaVencimiento: cu.fecha_vencimiento,
+              montoCuota: Number(cu.monto_cuota || 0),
+              moraAcumulada: Number(cu.mora_acumulada || 0),
+              estado: (cu.estado || "PENDIENTE").toLowerCase(),
+            });
+          });
+        }
+      }
+
+      // 4. Formatear Préstamos y calcular métricas
+      let activosCount = 0;
+      let totalCuotasCount = 0;
+      let cuotasPuntualesCount = 0;
+
+      const prestamosFormateados: Prestamo[] = (pData || []).map((p) => {
+        const cLista = cuotasMap[p.id] || [];
+        const estadoP = (p.estado || "ACTIVO").toLowerCase();
+        if (estadoP === "activo") activosCount++;
+
+        cLista.forEach((cu) => {
+          totalCuotasCount++;
+          if (cu.estado === "pagado") cuotasPuntualesCount++;
+        });
+
+        return {
+          id: p.id,
+          codigoPrestamo: `PRES-${p.id.substring(0, 6).toUpperCase()}`,
+          montoDesembolsado: Number(p.monto_monto || p.monto_prestado || 0),
+          saldoPendiente: Number(p.saldo_pendiente || 0),
+          estado: estadoP,
+          cuotas: cLista,
+        };
+      });
+
+      setPrestamos(prestamosFormateados);
+      setStats({
+        totalPrestamos: prestamosFormateados.length,
+        prestamosActivos: activosCount,
+        tasaPuntual: totalCuotasCount > 0 ? Math.round((cuotasPuntualesCount / totalCuotasCount) * 100) : 100,
+      });
+    } catch (err: any) {
+      console.error("Error al cargar detalle del cliente desde Supabase:", err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarDatos();
+  }, [id]);
+
+  if (loading || !cliente) {
     return (
       <AppShell hideNav header={<PageHeader title="Cliente" back="/clientes" />}>
-        <div className="flex justify-center py-16 text-brand"><Spinner size={28} /></div>
+        <div className="flex justify-center py-16 text-brand">
+          <Spinner size={28} />
+        </div>
       </AppShell>
     );
   }
 
-  const { cliente: c, prestamos, stats } = q.data;
+  const c = cliente;
 
   const tabs: { id: Tab; label: string; icon: typeof CreditCard }[] = [
     { id: "creditos", label: "Créditos", icon: CreditCard },
@@ -71,12 +220,12 @@ export default function ClienteDetallePage() {
       {/* Ficha */}
       <div className="mb-4 flex items-center gap-4 rounded-2xl border border-line bg-white p-4">
         <div
-          className="flex h-16 w-16 items-center justify-center rounded-full font-display text-xl font-bold"
+          className="flex h-16 w-16 items-center justify-center rounded-full font-display text-xl font-bold shrink-0"
           style={{ background: scoreBg(c.historialCrediticioScore), color: scoreColor(c.historialCrediticioScore) }}
         >
           {iniciales(c.nombreCompleto)}
         </div>
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex flex-wrap gap-2">
             <Badge color={c.estado === "moroso" ? "danger" : c.estado === "inactivo" ? "gray" : "success"}>
               {c.estado === "moroso" ? "Moroso" : c.estado === "inactivo" ? "Inactivo" : "Activo"}
@@ -141,7 +290,7 @@ export default function ClienteDetallePage() {
                             {p.estado}
                           </Badge>
                         </div>
-                        <p className="text-xs text-ink-soft">
+                        <p className="text-xs text-ink-soft mt-0.5">
                           {formatMoneda(p.montoDesembolsado, moneda)} · {pagadas}/{p.cuotas.length} cuotas · saldo {formatMoneda(p.saldoPendiente, moneda)}
                         </p>
                       </div>
@@ -168,7 +317,9 @@ export default function ClienteDetallePage() {
                                   <td className="tnum px-3 py-2 text-right">
                                     {formatMoneda(cu.montoCuota + cu.moraAcumulada, moneda)}
                                   </td>
-                                  <td className="px-3 py-2 text-right"><Badge color={est.color}>{est.label}</Badge></td>
+                                  <td className="px-3 py-2 text-right">
+                                    <Badge color={est.color}>{est.label}</Badge>
+                                  </td>
                                 </tr>
                               );
                             })}

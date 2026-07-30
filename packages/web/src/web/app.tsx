@@ -1,7 +1,5 @@
 import { Route, Switch } from "wouter";
 import { Provider } from "./components/provider";
-import { ProtectedRoute } from "./components/protected-route";
-import { AgentFeedback, RunableBadge } from "@runablehq/website-runtime";
 import SignInPage from "./pages/sign-in";
 import Dashboard from "./pages/index";
 import ClientesPage from "./pages/clientes";
@@ -18,40 +16,36 @@ function App() {
       <Switch>
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/">
-          <ProtectedRoute><Dashboard /></ProtectedRoute>
+          <Dashboard />
         </Route>
         <Route path="/clientes">
-          <ProtectedRoute><ClientesPage /></ProtectedRoute>
+          <ClientesPage />
         </Route>
         <Route path="/clientes/nuevo">
-          <ProtectedRoute><ClienteNuevoPage /></ProtectedRoute>
+          <ClienteNuevoPage />
         </Route>
         <Route path="/clientes/:id/editar">
-          <ProtectedRoute><ClienteNuevoPage /></ProtectedRoute>
+          <ClienteNuevoPage />
         </Route>
         <Route path="/clientes/:id">
-          <ProtectedRoute><ClienteDetallePage /></ProtectedRoute>
+          <ClienteDetallePage />
         </Route>
         <Route path="/prestamos">
-          <ProtectedRoute><PrestamosPage /></ProtectedRoute>
+          <PrestamosPage />
         </Route>
         <Route path="/prestamos/nuevo">
-          <ProtectedRoute><PrestamoNuevoPage /></ProtectedRoute>
+          <PrestamoNuevoPage />
         </Route>
         <Route path="/prestamos/:id">
-          <ProtectedRoute><PrestamoDetallePage /></ProtectedRoute>
+          <PrestamoDetallePage />
         </Route>
         <Route path="/config">
-          <ProtectedRoute><ConfigPage /></ProtectedRoute>
+          <ConfigPage />
         </Route>
         <Route>
-          <ProtectedRoute><Dashboard /></ProtectedRoute>
+          <Dashboard />
         </Route>
       </Switch>
-      {/* Do not remove — off by default, activated by parent iframe via postMessage */}
-      {import.meta.env.DEV && <AgentFeedback />}
-      {/* "Made with Runable" badge - if user asks to remove the runable badge, remove this code as well as comment */}
-      {<RunableBadge />}
     </Provider>
   );
 }

@@ -1,57 +1,96 @@
+import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Home, Users, FileText, Settings, ChevronLeft } from "lucide-react";
+import { Home, Users, FileText, Settings, ChevronLeft, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 
-const NAV = [
-  { to: "/", label: "Inicio", icon: Home },
-  { to: "/clientes", label: "Clientes", icon: Users },
-  { to: "/prestamos", label: "Préstamos", icon: FileText },
-  { to: "/config", label: "Config", icon: Settings },
-];
-
-export function BottomNav() {
-  const [location] = useLocation();
-  const isActive = (to: string) =>
-    to === "/" ? location === "/" : location.startsWith(to);
-  return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md border-t border-line bg-white shadow-[0_-2px_12px_rgba(0,0,0,0.05)]">
-      <div className="grid grid-cols-4">
-        {NAV.map((n) => {
-          const active = isActive(n.to);
-          const Icon = n.icon;
-          return (
-            <Link
-              key={n.to}
-              to={n.to}
-              className={cn(
-                "flex flex-col items-center gap-1 py-2.5 text-xs font-medium transition",
-                active ? "text-brand" : "text-gray-400",
-              )}
-            >
-              <Icon size={22} strokeWidth={active ? 2.4 : 2} />
-              <span>{n.label}</span>
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
-  );
+interface AppShellProps {
+  children: ReactNode;
+  header?: ReactNode;
+  hideNav?: boolean;
 }
 
-export function AppShell({
-  children,
-  header,
-  hideNav = false,
-}: {
-  children: React.ReactNode;
-  header?: React.ReactNode;
-  hideNav?: boolean;
-}) {
+export function AppShell({ children, header, hideNav = false }: AppShellProps) {
+  const [location] = useLocation();
+
+  const navItems = [
+    { href: "/", label: "Inicio", icon: Home },
+    { href: "/clientes", label: "Clientes", icon: Users },
+    { href: "/prestamos", label: "Préstamos", icon: FileText },
+    { href: "/config", label: "Configuración", icon: Settings },
+  ];
+
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-surface">
-      {header}
-      <main className="flex-1 px-4 pb-28 pt-4">{children}</main>
-      {!hideNav && <BottomNav />}
+    <div className="min-h-dvh bg-slate-100 text-slate-900 pb-24 md:pb-10">
+      {/* 1. Header Global para Escritorio/Laptop */}
+      <header className="sticky top-0 z-40 w-full bg-slate-900 text-white shadow-lg">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
+          <Link to="/" className="flex items-center gap-3 cursor-pointer">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 font-display text-xl font-black text-slate-950 shadow-md">
+              C
+            </div>
+            <div>
+              <h1 className="font-display text-xl font-bold tracking-tight text-white">CrediGestor</h1>
+              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Sistema de Préstamos</p>
+            </div>
+          </Link>
+
+          {/* Menú de navegación integrado en pantalla de PC */}
+          <nav className="hidden md:flex items-center gap-1 bg-slate-800/60 p-1.5 rounded-2xl border border-slate-700/50">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all",
+                    active
+                      ? "bg-emerald-500 text-slate-950 shadow-sm"
+                      : "text-slate-300 hover:bg-slate-700/50 hover:text-white"
+                  )}
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      </header>
+
+      {/* Header secundario de página si existe */}
+      {header && <div className="w-full bg-slate-900 text-white border-t border-slate-800">{header}</div>}
+
+      {/* 2. Layout Contenedor Ancho para PC (max-w-7xl) */}
+      <div className="mx-auto w-full max-w-7xl px-4 md:px-8 pt-6">
+        <main className="w-full">{children}</main>
+      </div>
+
+      {/* 3. Navegación Inferior Móvil (Solo para Celular) */}
+      {!hideNav && (
+        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
+          <div className="mx-auto flex max-w-md justify-around py-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className={cn(
+                    "flex flex-col items-center gap-1 px-3 py-1 text-xs font-medium transition",
+                    active ? "text-emerald-600 font-bold" : "text-slate-400 hover:text-slate-600"
+                  )}
+                >
+                  <Icon size={20} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
@@ -65,24 +104,28 @@ export function PageHeader({
   title: string;
   subtitle?: string;
   back?: string;
-  right?: React.ReactNode;
+  right?: ReactNode;
 }) {
+  const [, navigate] = useLocation();
+
   return (
-    <header className="sticky top-0 z-30 mx-auto flex max-w-md items-center gap-2 border-b border-line bg-white/95 px-4 py-3.5 backdrop-blur">
-      {back && (
-        <Link
-          to={back}
-          className="-ml-1.5 rounded-lg p-1.5 text-brand hover:bg-gray-100"
-          aria-label="Volver"
-        >
-          <ChevronLeft size={22} />
-        </Link>
-      )}
-      <div className="min-w-0 flex-1">
-        <h1 className="truncate font-display text-lg font-semibold text-ink">{title}</h1>
-        {subtitle && <p className="truncate text-xs text-ink-soft">{subtitle}</p>}
+    <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <div className="flex items-center gap-3">
+        {back && (
+          <button
+            onClick={() => navigate(back)}
+            className="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white transition"
+            aria-label="Volver"
+          >
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        <div>
+          <h1 className="font-display text-lg md:text-xl font-bold leading-tight text-white">{title}</h1>
+          {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+        </div>
       </div>
-      {right}
-    </header>
+      {right && <div className="flex items-center gap-2">{right}</div>}
+    </div>
   );
 }
