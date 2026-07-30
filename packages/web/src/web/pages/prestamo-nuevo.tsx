@@ -17,7 +17,8 @@ type ClienteSimple = {
 
 type SimularResultado = {
   total: number;
-  montoCuota: number;
+  montoCuotaBase: number;
+  montoCuotaFinal: number;
   primeraFecha: string;
   interesMonto: number;
 };
@@ -39,13 +40,13 @@ export default function PrestamoNuevoPage() {
   const [monto, setMonto] = useState("500");
   const [plazo, setPlazo] = useState("12");
   const [interes, setInteres] = useState("10");
-  const [frecuencia, setFrecuencia] = useState<"diario" | "semanal" | "mensual">("semanal");
+  const [frecuencia, setFrecuencia] = useState<"diario" | "semanal" | "quincenal" | "mensual">("semanal");
   const [fecha, setFecha] = useState(hoyISO());
   const [notas, setNotas] = useState("");
   const [creando, setCreando] = useState(false);
 
   const moneda = "S/";
-  const frecuencias: ("diario" | "semanal" | "mensual")[] = ["diario", "semanal", "mensual"];
+  const frecuencias: ("diario" | "semanal" | "quincenal" | "mensual")[] = ["diario", "semanal", "quincenal", "mensual"];
 
   // Cargar clientes desde Supabase
   const cargarClientes = async () => {
@@ -88,27 +89,34 @@ export default function PrestamoNuevoPage() {
   const nInteres = Number(interes) || 0;
   const formValido = nMonto > 0 && nPlazo > 0 && !!fecha;
 
-  // Cálculo local de la simulación
+  // Cálculo local de la simulación con ajuste de céntimos en la última cuota
   const sim = useMemo<SimularResultado | null>(() => {
     if (!formValido) return null;
     const interesMonto = nMonto * (nInteres / 100);
     const total = nMonto + interesMonto;
-    const montoCuota = Math.round((total / nPlazo) * 100) / 100;
+    
+    // Calculamos cuota base redondeando a 2 decimales hacia abajo para no pasarnos
+    const montoCuotaBase = Math.floor((total / nPlazo) * 100) / 100;
+    
+    // La cuota final absorbe el posible desfase de céntimos
+    const montoCuotaFinal = Math.round((total - montoCuotaBase * (nPlazo - 1)) * 100) / 100;
 
     const fechaBase = new Date(fecha + "T00:00:00");
     if (frecuencia === "diario") fechaBase.setDate(fechaBase.getDate() + 1);
     else if (frecuencia === "semanal") fechaBase.setDate(fechaBase.getDate() + 7);
+    else if (frecuencia === "quincenal") fechaBase.setDate(fechaBase.getDate() + 15);
     else if (frecuencia === "mensual") fechaBase.setMonth(fechaBase.getMonth() + 1);
 
     return {
       total,
-      montoCuota,
+      montoCuotaBase,
+      montoCuotaFinal,
       primeraFecha: fechaBase.toISOString().slice(0, 10),
       interesMonto,
     };
   }, [nMonto, nPlazo, nInteres, frecuencia, fecha, formValido]);
 
-  // Insertar préstamo según el esquema EXACTO de tu base de datos
+  // Insertar préstamo según el esquema de la BD
   const crearPrestamo = async () => {
     if (!clienteId || !sim) return;
     setCreando(true);
@@ -141,15 +149,29 @@ export default function PrestamoNuevoPage() {
       let fechaCuota = new Date(fecha + "T00:00:00");
 
       for (let i = 1; i <= nPlazo; i++) {
-        if (frecuencia === "diario") fechaCuota.setDate(fechaCuota.getDate() + 1);
-        else if (frecuencia === "semanal") fechaCuota.setDate(fechaCuota.getDate() + 7);
-        else if (frecuencia === "mensual") fechaCuota.setMonth(fechaCuota.getMonth() + 1);
+        if (frecuencia === "diario") {
+          fechaCuota.setDate(fechaCuota.getDate() + 1);
+          // Saltar domingos automáticamente
+          if (fechaCuota.getDay() === 0) fechaCuota.setDate(fechaCuota.getDate() + 1);
+        } else if (frecuencia === "semanal") {
+          fechaCuota.setDate(fechaCuota.getDate() + 7);
+        } else if (frecuencia === "quincenal") {
+          fechaCuota.setDate(fechaCuota.getDate() + 15);
+        } else if (frecuencia === "mensual") {
+          fechaCuota.setMonth(fechaCuota.getMonth() + 1);
+        }
+
+        const esUltimaCuota = i === nPlazo;
+        const montoAsignado = esUltimaCuota ? sim.montoCuotaFinal : sim.montoCuotaBase;
 
         cuotasParaInsertar.push({
           prestamo_id: pData.id,
           numero_cuota: i,
           fecha_vencimiento: fechaCuota.toISOString().slice(0, 10),
-          monto_cuota: sim.montoCuota,
+          monto_cuota: montoAsignado,
+          saldo_cuota: montoAsignado,
+          monto_abonado: 0,
+          mora_acumulada: 0,
           estado: "PENDIENTE",
         });
       }
@@ -157,8 +179,8 @@ export default function PrestamoNuevoPage() {
       const { error: cError } = await supabase.from("cuotas").insert(cuotasParaInsertar);
       if (cError) console.warn("Aviso al crear cuotas:", cError.message);
 
-      showToast("Préstamo creado con éxito", "success");
-      navigate("/");
+      showToast("Préstamo generado correctamente", "success");
+      navigate(`/prestamos/${pData.id}`);
     } catch (err: any) {
       showToast(err?.message || "Error al crear el préstamo", "error");
     } finally {
@@ -196,7 +218,7 @@ export default function PrestamoNuevoPage() {
                     setClienteId(c.id);
                     setPaso(2);
                   }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-emerald-500 transition"
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-emerald-500 transition shadow-sm"
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-emerald-400">
                     {iniciales(c.nombreCompleto)}
@@ -244,14 +266,14 @@ export default function PrestamoNuevoPage() {
           </div>
 
           <Field label="Frecuencia de pago">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {frecuencias.map((f) => (
                 <button
                   key={f}
                   onClick={() => setFrecuencia(f)}
                   className={cn(
                     "rounded-xl border py-2.5 text-xs font-semibold capitalize transition",
-                    frecuencia === f ? "border-slate-900 bg-slate-900 text-emerald-400 font-bold" : "border-slate-200 bg-white text-slate-700",
+                    frecuencia === f ? "border-slate-900 bg-slate-900 text-emerald-400 font-bold shadow-md" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                   )}
                 >
                   {f}
@@ -270,22 +292,28 @@ export default function PrestamoNuevoPage() {
 
           {/* Preview */}
           {formValido && sim && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
-              <div className="mb-2 flex items-center gap-2 text-emerald-800">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+              <div className="mb-3 flex items-center gap-2 text-emerald-800 border-b border-emerald-200/50 pb-2">
                 <Calculator size={16} />
-                <p className="text-sm font-bold">Previsualización del Préstamo</p>
+                <p className="text-sm font-bold">Simulación de Cuotas</p>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm">
                 <PreviewItem label="Total a pagar" valor={formatMoneda(sim.total, moneda)} />
-                <PreviewItem label="Valor por cuota" valor={formatMoneda(sim.montoCuota, moneda)} />
-                <PreviewItem label="1ra cuota" valor={sim.primeraFecha ? formatFecha(sim.primeraFecha) : "—"} />
-                <PreviewItem label="Interés" valor={formatMoneda(sim.interesMonto, moneda)} />
+                <PreviewItem label="Interés a ganar" valor={formatMoneda(sim.interesMonto, moneda)} />
+                
+                <PreviewItem label={`Primeras ${nPlazo > 1 ? nPlazo - 1 : 1} cuotas`} valor={formatMoneda(sim.montoCuotaBase, moneda)} />
+                {nPlazo > 1 && (
+                  <PreviewItem label="Cuota final (Ajuste)" valor={formatMoneda(sim.montoCuotaFinal, moneda)} />
+                )}
+                <div className="col-span-2 mt-1">
+                  <p className="text-xs text-slate-500">Primer vencimiento proyectado: <span className="font-bold text-slate-800">{formatFecha(sim.primeraFecha)}</span></p>
+                </div>
               </div>
             </div>
           )}
 
           <Button className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" disabled={!formValido || !sim} onClick={() => setPaso(3)}>
-            Continuar
+            Continuar al Resumen
           </Button>
         </div>
       )}
@@ -293,23 +321,27 @@ export default function PrestamoNuevoPage() {
       {/* Paso 3: Confirmación */}
       {paso === 3 && sim && (
         <div className="space-y-4 max-w-2xl mx-auto">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="mb-4 font-display text-lg font-bold text-slate-900">Confirmar préstamo</p>
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+            <p className="mb-4 font-display text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">Confirmar Crédito</p>
             <dl className="space-y-3 text-sm">
-              <Row label="Cliente" valor={cliente?.nombreCompleto ?? "Juan Pérez Test"} />
-              <Row label="Monto desembolsado" valor={formatMoneda(nMonto, moneda)} />
-              <Row label="Interés" valor={`${nInteres}%`} />
-              <Row label="N° de cuotas" valor={`${nPlazo} (${frecuencia})`} />
-              <Row label="Valor por cuota" valor={formatMoneda(sim.montoCuota, moneda)} />
-              <Row label="Fecha desembolso" valor={formatFecha(fecha)} />
+              <Row label="Cliente Beneficiario" valor={cliente?.nombreCompleto ?? "Cliente"} />
+              <Row label="Monto prestado" valor={formatMoneda(nMonto, moneda)} />
+              <Row label="Tasa de Interés" valor={`${nInteres}%`} />
+              <Row label="N° de cuotas" valor={`${nPlazo} cuotas`} />
+              <Row label="Frecuencia" valor={<span className="capitalize">{frecuencia}</span>} />
               <div className="my-3 border-t border-slate-100" />
-              <Row label="Total a pagar" valor={formatMoneda(sim.total, moneda)} destacado />
+              <Row label="Valor cuota base" valor={formatMoneda(sim.montoCuotaBase, moneda)} />
+              {nPlazo > 1 && (
+                <Row label="Valor cuota final" valor={formatMoneda(sim.montoCuotaFinal, moneda)} />
+              )}
+              <div className="my-3 border-t border-slate-100" />
+              <Row label="Total a recaudar" valor={formatMoneda(sim.total, moneda)} destacado />
             </dl>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" className="flex-1 py-3" onClick={() => setPaso(2)}>Atrás</Button>
-            <Button variant="success" className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" loading={creando} onClick={crearPrestamo}>
-              <Check size={18} /> Crear préstamo
+            <Button variant="outline" className="flex-1 py-3.5" onClick={() => setPaso(2)}>Modificar</Button>
+            <Button variant="success" className="flex-1 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" loading={creando} onClick={crearPrestamo}>
+              <Check size={18} /> Confirmar
             </Button>
           </div>
         </div>
@@ -321,13 +353,13 @@ export default function PrestamoNuevoPage() {
 function PreviewItem({ label, valor }: { label: string; valor: string }) {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="tnum font-display font-bold text-slate-900">{valor}</p>
+      <p className="text-xs text-slate-500 mb-0.5">{label}</p>
+      <p className="tnum font-display text-base font-black text-slate-900">{valor}</p>
     </div>
   );
 }
 
-function Row({ label, valor, destacado = false }: { label: string; valor: string; destacado?: boolean }) {
+function Row({ label, valor, destacado = false }: { label: string; valor: React.ReactNode; destacado?: boolean }) {
   return (
     <div className="flex items-center justify-between">
       <dt className="text-slate-500 font-medium">{label}</dt>

@@ -11,6 +11,8 @@ type Cuota = {
   numeroCuota: number;
   fechaVencimiento: string;
   montoCuota: number;
+  montoAbonado: number;
+  saldoCuota: number;
   moraAcumulada: number;
   estado: string;
 };
@@ -61,6 +63,10 @@ export default function PrestamoDetallePage() {
   const [registrandoPago, setRegistrandoPago] = useState(false);
   const [pagoBoleta, setPagoBoleta] = useState<Pago | null>(null);
 
+  // Estados para Modal Liquidación Adelantada
+  const [modalLiquidacion, setModalLiquidacion] = useState(false);
+  const [conDescuento, setConDescuento] = useState(false);
+
   const moneda = "S/";
 
   const cargarDetalle = async () => {
@@ -70,17 +76,9 @@ export default function PrestamoDetallePage() {
       const { data: pData, error: pErr } = await supabase
         .from("prestamos")
         .select(`
-          id,
-          codigo_prestamo,
-          monto_desembolsado,
-          saldo_pendiente,
-          interes_porcentaje,
-          frecuencia,
-          fecha_desembolso,
-          created_at,
-          estado,
-          cliente_id,
-          clientes ( id, nombre_completo, telefono, dni )
+          id, codigo_prestamo, monto_desembolsado, saldo_pendiente, 
+          interes_porcentaje, frecuencia, fecha_desembolso, created_at, estado, 
+          cliente_id, clientes ( id, nombre_completo, telefono, dni )
         `)
         .eq("id", id)
         .single();
@@ -95,7 +93,7 @@ export default function PrestamoDetallePage() {
         interesPorcentaje: Number(pData.interes_porcentaje || 0),
         frecuencia: (pData.frecuencia || "DIARIO").toLowerCase(),
         fechaDesembolso: pData.fecha_desembolso || pData.created_at,
-        estado: (pData.estado || "ACTIVO").toLowerCase(),
+        estado: (pData.estado || "ACTIVO").toUpperCase(),
       };
 
       setPrestamo(pFormateado);
@@ -124,6 +122,8 @@ export default function PrestamoDetallePage() {
             numeroCuota: c.numero_cuota,
             fechaVencimiento: c.fecha_vencimiento,
             montoCuota: Number(c.monto_cuota || 0),
+            montoAbonado: Number(c.monto_abonado || 0),
+            saldoCuota: Number(c.saldo_cuota ?? c.monto_cuota),
             moraAcumulada: Number(c.mora_acumulada || 0),
             estado: (c.estado || "PENDIENTE").toLowerCase(),
           }))
@@ -133,7 +133,8 @@ export default function PrestamoDetallePage() {
       const { data: pgData, error: pgErr } = await supabase
         .from("pagos")
         .select("id, monto_pagado, metodo_pago, numero_operacion, fecha_pago")
-        .eq("prestamo_id", id);
+        .eq("prestamo_id", id)
+        .order("fecha_pago", { ascending: false });
 
       if (!pgErr && pgData) {
         setPagos(
@@ -143,7 +144,7 @@ export default function PrestamoDetallePage() {
             fechaPago: pg.fecha_pago || new Date().toISOString(),
             metodoPago: pg.metodo_pago || "EFECTIVO",
             numeroOperacion: pg.numero_operacion || null,
-            cuotaNumero: index + 1,
+            cuotaNumero: pgData.length - index,
           }))
         );
       }
@@ -158,6 +159,7 @@ export default function PrestamoDetallePage() {
     cargarDetalle();
   }, [id]);
 
+  // Registrar cobro estándar de la siguiente cuota
   const registrarPagoCuota = async () => {
     if (!prestamo) return;
 
@@ -167,7 +169,8 @@ export default function PrestamoDetallePage() {
       return;
     }
 
-    const montoPago = cuotaPendiente.montoCuota;
+    // Cobramos el saldo restante de la cuota (soporta pagos parciales futuros)
+    const montoPago = cuotaPendiente.saldoCuota;
     const nuevoSaldo = Math.max(0, prestamo.saldoPendiente - montoPago);
     const estaCompletado = nuevoSaldo === 0;
 
@@ -186,7 +189,11 @@ export default function PrestamoDetallePage() {
 
       const { error: cErr } = await supabase
         .from("cuotas")
-        .update({ estado: "PAGADO" })
+        .update({ 
+          estado: "PAGADO",
+          monto_abonado: cuotaPendiente.montoCuota,
+          saldo_cuota: 0
+        })
         .eq("id", cuotaPendiente.id);
       if (cErr) throw cErr;
 
@@ -207,6 +214,58 @@ export default function PrestamoDetallePage() {
     }
   };
 
+  // Liquidar todo el préstamo de golpe
+  const liquidarPrestamo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prestamo) return;
+
+    setRegistrandoPago(true);
+    try {
+      const cuotasPendientes = cuotas.filter((c) => c.estado !== "pagado");
+      let montoCobroLiquidacion = prestamo.saldoPendiente;
+
+      // Si aplica descuento, le restamos el interés proporcional de las cuotas que faltan
+      if (conDescuento) {
+        const interesTotal = prestamo.montoDesembolsado * (prestamo.interesPorcentaje / 100);
+        const interesPorCuota = interesTotal / cuotas.length;
+        const descuentoIntereses = interesPorCuota * cuotasPendientes.length;
+        montoCobroLiquidacion = Math.max(0, prestamo.saldoPendiente - Math.floor(descuentoIntereses));
+      }
+
+      // 1. Insertamos un pago global
+      const { error: pErr } = await supabase.from("pagos").insert([{
+        prestamo_id: prestamo.id,
+        monto_pagado: montoCobroLiquidacion,
+        metodo_pago: "EFECTIVO",
+        fecha_pago: new Date().toISOString(),
+      }]);
+      if (pErr) throw pErr;
+
+      // 2. Marcamos todas las cuotas pendientes como pagadas
+      const idsPendientes = cuotasPendientes.map(c => c.id);
+      if (idsPendientes.length > 0) {
+        await supabase.from("cuotas").update({ 
+          estado: "PAGADO", 
+          saldo_cuota: 0 
+        }).in("id", idsPendientes);
+      }
+
+      // 3. Cancelamos el préstamo
+      await supabase.from("prestamos").update({
+        saldo_pendiente: 0,
+        estado: "CANCELADO",
+      }).eq("id", prestamo.id);
+
+      setModalLiquidacion(false);
+      await cargarDetalle();
+      alert("¡Préstamo liquidado exitosamente!");
+    } catch (err: any) {
+      alert("Error al liquidar: " + err.message);
+    } finally {
+      setRegistrandoPago(false);
+    }
+  };
+
   if (loading || !prestamo) {
     return (
       <AppShell hideNav header={<PageHeader title="Préstamo" back="/prestamos" />}>
@@ -220,7 +279,7 @@ export default function PrestamoDetallePage() {
   const pct = cuotas.length > 0 ? Math.round((pagadas / cuotas.length) * 100) : 0;
   const totalPagar = cuotas.reduce((s, c) => s + c.montoCuota, 0);
   const totalMora = cuotas.reduce((s, c) => s + c.moraAcumulada, 0);
-  const cancelado = p.estado === "cancelado";
+  const cancelado = p.estado === "CANCELADO";
   const siguienteCuota = cuotas.find((c) => c.estado !== "pagado");
 
   return (
@@ -247,8 +306,8 @@ export default function PrestamoDetallePage() {
               <p className="text-xs text-slate-400">Saldo pendiente</p>
               <p className="tnum font-display text-3xl font-black text-emerald-400">{formatMoneda(p.saldoPendiente, moneda)}</p>
             </div>
-            <Badge color={cancelado ? "success" : p.estado === "judicial" ? "danger" : "accent"}>
-              {cancelado ? "Cancelado" : p.estado === "judicial" ? "Judicial" : "Activo"}
+            <Badge color={cancelado ? "success" : p.estado === "JUDICIAL" ? "danger" : "accent"}>
+              {cancelado ? "Cancelado" : p.estado === "JUDICIAL" ? "Judicial" : "Activo"}
             </Badge>
           </div>
           <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
@@ -279,10 +338,17 @@ export default function PrestamoDetallePage() {
           </div>
         )}
 
+        {/* Botones de Acción */}
         {!cancelado && (
-          <Button variant="success" className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md" loading={registrandoPago} onClick={registrarPagoCuota}>
-            <HandCoins size={18} /> Registrar cobro cuota ({formatMoneda(siguienteCuota?.montoCuota || 0, moneda)})
-          </Button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Button variant="success" className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-sm" loading={registrandoPago} onClick={registrarPagoCuota}>
+              <HandCoins size={18} /> Cobrar 1 Cuota ({formatMoneda(siguienteCuota?.saldoCuota || 0, moneda)})
+            </Button>
+
+            <Button variant="outline" className="w-full py-3.5 border-slate-300 text-slate-700 font-bold hover:bg-slate-50" onClick={() => setModalLiquidacion(true)}>
+              <FileText size={18} /> Liquidar Préstamo
+            </Button>
+          </div>
         )}
 
         {/* Cronograma */}
@@ -376,6 +442,64 @@ export default function PrestamoDetallePage() {
           )}
         </div>
       </div>
+
+      {/* MODAL DE LIQUIDACIÓN ADELANTADA */}
+      {modalLiquidacion && !cancelado && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-display text-lg font-bold text-slate-900">Liquidar Préstamo</h3>
+              <button onClick={() => setModalLiquidacion(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition">
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              Vas a cobrar todas las cuotas pendientes en un solo pago. 
+              El saldo deudor actual es de <strong className="text-slate-900">{formatMoneda(p.saldoPendiente, moneda)}</strong>.
+            </p>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="descuento" 
+                  checked={!conDescuento} 
+                  onChange={() => setConDescuento(false)}
+                  className="mt-1"
+                />
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Cobro Íntegro Normal</p>
+                  <p className="text-xs text-slate-500">El cliente paga el saldo completo incluyendo los intereses proyectados.</p>
+                </div>
+              </label>
+
+              <div className="border-t border-slate-200"></div>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="descuento" 
+                  checked={conDescuento} 
+                  onChange={() => setConDescuento(true)}
+                  className="mt-1"
+                />
+                <div>
+                  <p className="text-sm font-bold text-emerald-600">Aplicar Descuento</p>
+                  <p className="text-xs text-slate-500">Se exonera la parte proporcional del interés por pago adelantado.</p>
+                </div>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-3">
+              <Button variant="outline" className="py-3" onClick={() => setModalLiquidacion(false)}>Cancelar</Button>
+              <Button loading={registrandoPago} onClick={liquidarPrestamo} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold">
+                Liquidar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Boleta para PDF / Impresión */}
       {pagoBoleta && (
