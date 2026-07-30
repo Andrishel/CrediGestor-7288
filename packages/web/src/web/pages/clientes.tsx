@@ -39,7 +39,6 @@ export default function ClientesPage() {
 
       if (error) throw error;
 
-      // Mapeamos los campos de la tabla SQL a la interfaz que espera la UI
       const formateados: Cliente[] = (data || []).map((c: any) => {
         let dir = c.direccion_puesto || "";
         let puesto = null;
@@ -78,7 +77,8 @@ export default function ClientesPage() {
       c.nombreCompleto.toLowerCase().includes(q.toLowerCase()) ||
       c.dni.includes(q) ||
       (c.numeroPuesto ?? "").toLowerCase().includes(q.toLowerCase()) ||
-      (c.direccionPuestoMercado ?? "").toLowerCase().includes(q.toLowerCase()),
+      (c.direccionPuestoMercado ?? "").toLowerCase().includes(q.toLowerCase()) ||
+      (c.telefono ?? "").includes(q)
   );
 
   return (
@@ -155,9 +155,9 @@ export default function ClientesPage() {
                       DNI {c.dni}
                       {c.telefono ? ` · ${c.telefono}` : ""}
                     </p>
-                    {c.numeroPuesto && (
+                    {(c.numeroPuesto || c.direccionPuestoMercado) && (
                       <p className="truncate text-[10px] font-semibold text-emerald-600 mt-0.5 bg-emerald-50 w-max px-1.5 py-0.5 rounded-md">
-                        📍 Puesto {c.numeroPuesto}
+                        📍 {c.direccionPuestoMercado} {c.numeroPuesto ? `Puesto ${c.numeroPuesto}` : ""}
                       </p>
                     )}
                   </div>

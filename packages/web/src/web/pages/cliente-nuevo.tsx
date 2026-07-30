@@ -1,154 +1,178 @@
 import { useState } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useLocation } from "wouter";
+import { User, Phone, MapPin, UserCheck, Save } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
-import { validarDNI, validarTelefono } from "../lib/utils";
 import { supabase } from "../lib/supabase";
-
-type Form = {
-  nombreCompleto: string;
-  dni: string;
-  telefono: string;
-  direccionPuestoMercado: string;
-  numeroPuesto: string;
-  notas: string;
-};
-
-const vacio: Form = {
-  nombreCompleto: "",
-  dni: "",
-  telefono: "",
-  direccionPuestoMercado: "",
-  numeroPuesto: "",
-  notas: "",
-};
 
 export default function ClienteNuevoPage() {
   const [, navigate] = useLocation();
-  const [matchEdit, params] = useRoute("/clientes/:id/editar");
-  const editId = matchEdit ? params?.id : undefined;
   const showToast = useToast();
 
-  const [form, setForm] = useState<Form>(vacio);
-  const [inicializado, setInicializado] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errores, setErrores] = useState<Partial<Record<keyof Form, string>>>({});
+  const [nombreCompleto, setNombreCompleto] = useState("");
+  const [dni, setDni] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [direccionPuesto, setDireccionPuesto] = useState("");
+  const [direccionCasa, setDireccionCasa] = useState("");
+  const [referenciaCasa, setReferenciaCasa] = useState("");
+  const [contactoNombre, setContactoNombre] = useState("");
+  const [contactoTelefono, setContactoTelefono] = useState("");
+  const [guardando, setGuardando] = useState(false);
 
-  // Precargar en modo edición desde Supabase
-  if (editId && !inicializado) {
-    setInicializado(true);
-    supabase
-      .from("clientes")
-      .select("*")
-      .eq("id", editId)
-      .single()
-      .then(({ data, error }) => {
-        if (!error && data) {
-          setForm({
-            nombreCompleto: data.nombre_completo || "",
-            dni: data.dni || "",
-            telefono: data.telefono || "",
-            direccionPuestoMercado: data.direccion_puesto || "",
-            numeroPuesto: "",
-            notas: "",
-          });
-        }
-      });
-  }
+  const guardarCliente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nombreCompleto.trim() || !dni.trim()) {
+      showToast("El nombre y el DNI son obligatorios", "error");
+      return;
+    }
 
-  const set = (k: keyof Form, v: string) => setForm((f) => ({ ...f, [k]: v }));
-
-  const validar = () => {
-    const e: Partial<Record<keyof Form, string>> = {};
-    if (!form.nombreCompleto.trim()) e.nombreCompleto = "Ingresa el nombre completo";
-    if (!validarDNI(form.dni)) e.dni = "DNI inválido (8 dígitos)";
-    if (form.telefono && !validarTelefono(form.telefono)) e.telefono = "Teléfono inválido (9 dígitos, empieza con 9)";
-    setErrores(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const submit = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (!validar()) return;
-
-    setLoading(true);
-
-    // Mapeo exacto con los nombres de columna del script SQL de Supabase
-    const payload = {
-      nombre_completo: form.nombreCompleto.trim(),
-      dni: form.dni.trim(),
-      telefono: form.telefono.trim() || null,
-      direccion_puesto: [form.direccionPuestoMercado.trim(), form.numeroPuesto.trim()]
-        .filter(Boolean)
-        .join(" - ") || null,
-      historial_score: 100,
-      estado: "ACTIVO",
-    };
-
+    setGuardando(true);
     try {
-      if (editId) {
-        const { error } = await supabase
-          .from("clientes")
-          .update(payload)
-          .eq("id", editId);
+      const { data, error } = await supabase
+        .from("clientes")
+        .insert([
+          {
+            nombre_completo: nombreCompleto.trim(),
+            dni: dni.trim(),
+            telefono: telefono.trim() || null,
+            direccion_puesto: direccionPuesto.trim() || null,
+            direccion_casa: direccionCasa.trim() || null,
+            referencia_casa: referenciaCasa.trim() || null,
+            contacto_nombre: contactoNombre.trim() || null,
+            contacto_telefono: contactoTelefono.trim() || null,
+            estado: "ACTIVO",
+          },
+        ])
+        .select("id")
+        .single();
 
-        if (error) throw error;
+      if (error) throw error;
 
-        showToast("Cliente actualizado", "success");
-        navigate(`/clientes/${editId}`);
-      } else {
-        const { data, error } = await supabase
-          .from("clientes")
-          .insert([payload])
-          .select("id")
-          .single();
-
-        if (error) throw error;
-
-        showToast("Cliente registrado", "success");
-        navigate(`/clientes/${data.id}`);
-      }
+      showToast("Cliente registrado correctamente", "success");
+      navigate(`/clientes/${data.id}`);
     } catch (err: any) {
-      showToast(err?.message || "Error al guardar cliente en Supabase", "error");
+      showToast(err?.message || "Error al registrar cliente", "error");
     } finally {
-      setLoading(false);
+      setGuardando(false);
     }
   };
 
   return (
-    <AppShell
-      hideNav
-      header={<PageHeader title={editId ? "Editar cliente" : "Nuevo cliente"} back={editId ? `/clientes/${editId}` : "/clientes"} />}
-    >
-      <form onSubmit={submit} className="space-y-4">
-        <Field label="Nombre completo" error={errores.nombreCompleto}>
-          <input className={inputClass} value={form.nombreCompleto} onChange={(e) => set("nombreCompleto", e.target.value)} placeholder="Ej. María Quispe Flores" />
-        </Field>
-        <Field label="DNI" error={errores.dni}>
-          <input className={inputClass} inputMode="numeric" maxLength={8} value={form.dni} onChange={(e) => set("dni", e.target.value.replace(/\D/g, ""))} placeholder="12345678" />
-        </Field>
-        <Field label="Teléfono" error={errores.telefono} hint="Opcional · para Yape/Plin y recordatorios">
-          <input className={inputClass} inputMode="numeric" maxLength={9} value={form.telefono} onChange={(e) => set("telefono", e.target.value.replace(/\D/g, ""))} placeholder="987654321" />
-        </Field>
-        <Field label="Dirección / Puesto de mercado" hint="Opcional">
-          <input className={inputClass} value={form.direccionPuestoMercado} onChange={(e) => set("direccionPuestoMercado", e.target.value)} placeholder="Mercado Central, Pabellón A" />
-        </Field>
-        <Field label="Número de puesto" hint="Opcional">
-          <input className={inputClass} value={form.numeroPuesto} onChange={(e) => set("numeroPuesto", e.target.value)} placeholder="A-24" />
-        </Field>
-        <Field label="Notas" hint="Opcional">
-          <textarea className={inputClass} rows={3} value={form.notas} onChange={(e) => set("notas", e.target.value)} placeholder="Observaciones del cliente..." />
-        </Field>
+    <AppShell header={<PageHeader title="Nuevo cliente" back="/clientes" />}>
+      <form onSubmit={guardarCliente} className="max-w-2xl mx-auto space-y-6 pb-8">
+        
+        {/* Datos Personales */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
+            <User size={18} className="text-emerald-600" />
+            <h2 className="font-display text-base font-bold">Datos Personales</h2>
+          </div>
 
-        <div className="flex gap-2 pt-2">
-          <Button type="button" variant="outline" className="flex-1" onClick={() => navigate(editId ? `/clientes/${editId}` : "/clientes")}>
-            Cancelar
-          </Button>
-          <Button type="submit" className="flex-1" loading={loading}>
-            {editId ? "Guardar cambios" : "Registrar cliente"}
-          </Button>
+          <Field label="Nombre Completo *">
+            <input
+              className={inputClass}
+              placeholder="Ej. Juan Pérez Ramos"
+              value={nombreCompleto}
+              onChange={(e) => setNombreCompleto(e.target.value)}
+              required
+            />
+          </Field>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="DNI / Documento *">
+              <input
+                className={inputClass}
+                placeholder="8 dígitos"
+                value={dni}
+                onChange={(e) => setDni(e.target.value)}
+                required
+              />
+            </Field>
+
+            <Field label="Teléfono / WhatsApp">
+              <input
+                className={inputClass}
+                placeholder="Ej. 987654321"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+              />
+            </Field>
+          </div>
         </div>
+
+        {/* Ubicaciones */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
+            <MapPin size={18} className="text-emerald-600" />
+            <h2 className="font-display text-base font-bold">Ubicaciones y Puesto</h2>
+          </div>
+
+          <Field label="Ubicación del Puesto / Mercado">
+            <input
+              className={inputClass}
+              placeholder="Ej. Mercado Central - Puesto A-24"
+              value={direccionPuesto}
+              onChange={(e) => setDireccionPuesto(e.target.value)}
+            />
+          </Field>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Dirección de Domicilio / Casa">
+              <input
+                className={inputClass}
+                placeholder="Ej. Av. Grau 450"
+                value={direccionCasa}
+                onChange={(e) => setDireccionCasa(e.target.value)}
+              />
+            </Field>
+
+            <Field label="Referencia de Casa">
+              <input
+                className={inputClass}
+                placeholder="Ej. Frente al parque infantil"
+                value={referenciaCasa}
+                onChange={(e) => setReferenciaCasa(e.target.value)}
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Contacto de Respaldo */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
+            <UserCheck size={18} className="text-emerald-600" />
+            <h2 className="font-display text-base font-bold">Contacto de Respaldo (Garante/Familiar)</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Nombre del Contacto">
+              <input
+                className={inputClass}
+                placeholder="Ej. María Pérez (Esposa)"
+                value={contactoNombre}
+                onChange={(e) => setContactoNombre(e.target.value)}
+              />
+            </Field>
+
+            <Field label="Teléfono del Contacto">
+              <input
+                className={inputClass}
+                placeholder="Ej. 912345678"
+                value={contactoTelefono}
+                onChange={(e) => setContactoTelefono(e.target.value)}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <Button
+          type="submit"
+          loading={guardando}
+          className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md"
+        >
+          <Save size={18} /> Guardar Cliente
+        </Button>
       </form>
     </AppShell>
   );
