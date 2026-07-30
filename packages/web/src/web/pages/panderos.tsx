@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Plus, Users, Calendar } from "lucide-react";
+import { Plus, Users, Calendar, Coins } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { CardSkeleton, EmptyState, Badge, Button } from "../components/ui/primitives";
 import { formatMoneda, formatFecha } from "../lib/utils";
@@ -95,7 +95,9 @@ export default function PanderosPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {panderos.map((p) => {
-              const pozoTotal = p.montoCuota * p.totalParticipantes;
+              const pozoTeorico = p.montoCuota * p.totalParticipantes;
+              const pozoEfectivoNeto = p.totalParticipantes > 1 ? p.montoCuota * (p.totalParticipantes - 1) : pozoTeorico;
+
               return (
                 <Link
                   key={p.id}
@@ -112,12 +114,14 @@ export default function PanderosPage() {
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="rounded-xl bg-slate-50 p-2.5">
-                      <p className="text-slate-500 font-medium">Cuota por persona</p>
+                      <p className="text-slate-500 font-medium">Cuota x Persona</p>
                       <p className="font-bold text-slate-900 text-sm mt-0.5">{formatMoneda(p.montoCuota, moneda)}</p>
                     </div>
                     <div className="rounded-xl bg-emerald-50 p-2.5">
-                      <p className="text-emerald-700 font-medium">Pozo a Entregar</p>
-                      <p className="font-black text-emerald-800 text-sm mt-0.5">{formatMoneda(pozoTotal, moneda)}</p>
+                      <p className="text-emerald-700 font-medium flex items-center gap-1">
+                        <Coins size={12} /> Pozo Neto
+                      </p>
+                      <p className="font-black text-emerald-800 text-sm mt-0.5">{formatMoneda(pozoEfectivoNeto, moneda)}</p>
                     </div>
                   </div>
 

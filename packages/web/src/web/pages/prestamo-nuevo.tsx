@@ -42,13 +42,18 @@ export default function PrestamoNuevoPage() {
   const [interes, setInteres] = useState("10");
   const [frecuencia, setFrecuencia] = useState<"diario" | "semanal" | "quincenal" | "mensual">("semanal");
   const [fecha, setFecha] = useState(hoyISO());
-  const [notas, setNotas] = useState("");
+  
+  // Campos opcionales de Garantía
+  const [garanteNombre, setGaranteNombre] = useState("");
+  const [garanteDni, setGaranteDni] = useState("");
+  const [garanteTelefono, setGaranteTelefono] = useState("");
+  const [garantiaFisica, setGarantiaFisica] = useState("");
+
   const [creando, setCreando] = useState(false);
 
   const moneda = "S/";
   const frecuencias: ("diario" | "semanal" | "quincenal" | "mensual")[] = ["diario", "semanal", "quincenal", "mensual"];
 
-  // Cargar clientes desde Supabase
   const cargarClientes = async () => {
     setLoadingClientes(true);
     try {
@@ -89,16 +94,12 @@ export default function PrestamoNuevoPage() {
   const nInteres = Number(interes) || 0;
   const formValido = nMonto > 0 && nPlazo > 0 && !!fecha;
 
-  // Cálculo local de la simulación con ajuste de céntimos en la última cuota
   const sim = useMemo<SimularResultado | null>(() => {
     if (!formValido) return null;
     const interesMonto = nMonto * (nInteres / 100);
     const total = nMonto + interesMonto;
     
-    // Calculamos cuota base redondeando a 2 decimales hacia abajo para no pasarnos
     const montoCuotaBase = Math.floor((total / nPlazo) * 100) / 100;
-    
-    // La cuota final absorbe el posible desfase de céntimos
     const montoCuotaFinal = Math.round((total - montoCuotaBase * (nPlazo - 1)) * 100) / 100;
 
     const fechaBase = new Date(fecha + "T00:00:00");
@@ -107,16 +108,9 @@ export default function PrestamoNuevoPage() {
     else if (frecuencia === "quincenal") fechaBase.setDate(fechaBase.getDate() + 15);
     else if (frecuencia === "mensual") fechaBase.setMonth(fechaBase.getMonth() + 1);
 
-    return {
-      total,
-      montoCuotaBase,
-      montoCuotaFinal,
-      primeraFecha: fechaBase.toISOString().slice(0, 10),
-      interesMonto,
-    };
+    return { total, montoCuotaBase, montoCuotaFinal, primeraFecha: fechaBase.toISOString().slice(0, 10), interesMonto };
   }, [nMonto, nPlazo, nInteres, frecuencia, fecha, formValido]);
 
-  // Insertar préstamo según el esquema de la BD
   const crearPrestamo = async () => {
     if (!clienteId || !sim) return;
     setCreando(true);
@@ -133,9 +127,12 @@ export default function PrestamoNuevoPage() {
         interes_porcentaje: nInteres,
         saldo_pendiente: sim.total,
         estado: "ACTIVO",
+        garante_nombre: garanteNombre || null,
+        garante_dni: garanteDni || null,
+        garante_telefono: garanteTelefono || null,
+        garantia_fisica: garantiaFisica || null,
       };
 
-      // 1. Insertar préstamo en Supabase
       const { data: pData, error: pError } = await supabase
         .from("prestamos")
         .insert([nuevoPrestamoPayload])
@@ -144,14 +141,12 @@ export default function PrestamoNuevoPage() {
 
       if (pError) throw pError;
 
-      // 2. Generar y crear la lista de cuotas en Supabase
       const cuotasParaInsertar = [];
       let fechaCuota = new Date(fecha + "T00:00:00");
 
       for (let i = 1; i <= nPlazo; i++) {
         if (frecuencia === "diario") {
           fechaCuota.setDate(fechaCuota.getDate() + 1);
-          // Saltar domingos automáticamente
           if (fechaCuota.getDay() === 0) fechaCuota.setDate(fechaCuota.getDate() + 1);
         } else if (frecuencia === "semanal") {
           fechaCuota.setDate(fechaCuota.getDate() + 7);
@@ -190,14 +185,12 @@ export default function PrestamoNuevoPage() {
 
   return (
     <AppShell hideNav header={<PageHeader title="Nuevo préstamo" back="/prestamos" subtitle={`Paso ${paso} de 3`} />}>
-      {/* Progreso */}
       <div className="mb-5 flex items-center gap-1.5">
         {[1, 2, 3].map((n) => (
           <div key={n} className={cn("h-1.5 flex-1 rounded-full", n <= paso ? "bg-emerald-500" : "bg-slate-200")} />
         ))}
       </div>
 
-      {/* Paso 1: Cliente */}
       {paso === 1 && (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-slate-800">Selecciona el cliente</p>
@@ -214,10 +207,7 @@ export default function PrestamoNuevoPage() {
               {lista.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => {
-                    setClienteId(c.id);
-                    setPaso(2);
-                  }}
+                  onClick={() => { setClienteId(c.id); setPaso(2); }}
                   className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-emerald-500 transition shadow-sm"
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-emerald-400">
@@ -236,7 +226,6 @@ export default function PrestamoNuevoPage() {
         </div>
       )}
 
-      {/* Paso 2: Datos */}
       {paso === 2 && (
         <div className="space-y-4">
           {cliente && (
@@ -286,11 +275,24 @@ export default function PrestamoNuevoPage() {
             <input className={inputClass} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </Field>
 
-          <Field label="Notas" hint="Opcional">
-            <textarea className={inputClass} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Observaciones..." />
-          </Field>
+          <div className="my-4 border-t border-slate-200 pt-4 space-y-4">
+            <p className="text-sm font-bold text-slate-800">Garantías y Aval (Opcional)</p>
+            <Field label="Nombre del Garante / Aval">
+              <input className={inputClass} value={garanteNombre} onChange={(e) => setGaranteNombre(e.target.value)} placeholder="Nombre completo" />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="DNI Garante">
+                <input className={inputClass} value={garanteDni} onChange={(e) => setGaranteDni(e.target.value)} placeholder="N° Documento" />
+              </Field>
+              <Field label="Teléfono Garante">
+                <input className={inputClass} value={garanteTelefono} onChange={(e) => setGaranteTelefono(e.target.value)} placeholder="999 888 777" />
+              </Field>
+            </div>
+            <Field label="Garantía Física">
+              <input className={inputClass} value={garantiaFisica} onChange={(e) => setGarantiaFisica(e.target.value)} placeholder="Ej: Televisor Samsung 55''" />
+            </Field>
+          </div>
 
-          {/* Preview */}
           {formValido && sim && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
               <div className="mb-3 flex items-center gap-2 text-emerald-800 border-b border-emerald-200/50 pb-2">
@@ -300,7 +302,6 @@ export default function PrestamoNuevoPage() {
               <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm">
                 <PreviewItem label="Total a pagar" valor={formatMoneda(sim.total, moneda)} />
                 <PreviewItem label="Interés a ganar" valor={formatMoneda(sim.interesMonto, moneda)} />
-                
                 <PreviewItem label={`Primeras ${nPlazo > 1 ? nPlazo - 1 : 1} cuotas`} valor={formatMoneda(sim.montoCuotaBase, moneda)} />
                 {nPlazo > 1 && (
                   <PreviewItem label="Cuota final (Ajuste)" valor={formatMoneda(sim.montoCuotaFinal, moneda)} />
@@ -318,7 +319,6 @@ export default function PrestamoNuevoPage() {
         </div>
       )}
 
-      {/* Paso 3: Confirmación */}
       {paso === 3 && sim && (
         <div className="space-y-4 max-w-2xl mx-auto">
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
@@ -330,10 +330,11 @@ export default function PrestamoNuevoPage() {
               <Row label="N° de cuotas" valor={`${nPlazo} cuotas`} />
               <Row label="Frecuencia" valor={<span className="capitalize">{frecuencia}</span>} />
               <div className="my-3 border-t border-slate-100" />
+              {garanteNombre && <Row label="Garante / Aval" valor={garanteNombre} />}
+              {garantiaFisica && <Row label="Garantía" valor={garantiaFisica} />}
+              <div className="my-3 border-t border-slate-100" />
               <Row label="Valor cuota base" valor={formatMoneda(sim.montoCuotaBase, moneda)} />
-              {nPlazo > 1 && (
-                <Row label="Valor cuota final" valor={formatMoneda(sim.montoCuotaFinal, moneda)} />
-              )}
+              {nPlazo > 1 && <Row label="Valor cuota final" valor={formatMoneda(sim.montoCuotaFinal, moneda)} />}
               <div className="my-3 border-t border-slate-100" />
               <Row label="Total a recaudar" valor={formatMoneda(sim.total, moneda)} destacado />
             </dl>

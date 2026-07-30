@@ -28,7 +28,7 @@ export default function RootLayout() {
         config={{
           hostname,
           collectorUrl: "https://r.lilstts.com/events",
-          devmode: true,
+          devmode: false,
         }}
       >
         <SafeAreaProvider>

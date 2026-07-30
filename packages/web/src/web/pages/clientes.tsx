@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Search, Plus, Users } from "lucide-react";
+import { Search, Plus, Users, MessageCircle } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { CardSkeleton, EmptyState, Badge, Button } from "../components/ui/primitives";
 import { iniciales, scoreColor, scoreBg } from "../lib/utils";
@@ -9,7 +9,9 @@ import { supabase } from "../lib/supabase";
 type Cliente = {
   id: string;
   nombreCompleto: string;
+  tipoDocumento: string;
   dni: string;
+  prefijoTelefono: string;
   telefono: string | null;
   direccionPuestoMercado: string | null;
   numeroPuesto: string | null;
@@ -51,7 +53,9 @@ export default function ClientesPage() {
         return {
           id: c.id,
           nombreCompleto: c.nombre_completo || "",
+          tipoDocumento: c.tipo_documento || "DNI",
           dni: c.dni || "",
+          prefijoTelefono: c.prefijo_telefono || "+51",
           telefono: c.telefono || null,
           direccionPuestoMercado: dir || null,
           numeroPuesto: puesto,
@@ -99,7 +103,6 @@ export default function ClientesPage() {
       }
     >
       <div className="space-y-4">
-        {/* Buscador */}
         <div className="relative mb-2">
           <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -134,48 +137,70 @@ export default function ClientesPage() {
             {lista.map((c) => {
               const est = ESTADO[c.estado] ?? ESTADO.activo;
               return (
-                <Link
-                  key={c.id}
-                  to={`/clientes/${c.id}`}
-                  className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-500 hover:shadow-md"
-                >
-                  <div
-                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-display text-sm font-bold shadow-inner"
-                    style={{ background: scoreBg(c.historialCrediticioScore), color: scoreColor(c.historialCrediticioScore) }}
-                  >
-                    {iniciales(c.nombreCompleto)}
-                  </div>
+                <div key={c.id} className="group relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-500 hover:shadow-md">
+                  <Link to={`/clientes/${c.id}`} className="absolute inset-0 z-0" aria-label={`Ver perfil de ${c.nombreCompleto}`} />
                   
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-bold text-slate-900">{c.nombreCompleto}</p>
-                      <Badge color={est.color}>{est.label}</Badge>
+                  <div className="relative z-10 flex items-center gap-4 pointer-events-none">
+                    <div
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-display text-sm font-bold shadow-inner"
+                      style={{ background: scoreBg(c.historialCrediticioScore), color: scoreColor(c.historialCrediticioScore) }}
+                    >
+                      {iniciales(c.nombreCompleto)}
                     </div>
-                    <p className="truncate text-xs text-slate-500 mt-0.5">
-                      DNI {c.dni}
-                      {c.telefono ? ` · ${c.telefono}` : ""}
-                    </p>
-                    {(c.numeroPuesto || c.direccionPuestoMercado) && (
-                      <p className="truncate text-[10px] font-semibold text-emerald-600 mt-0.5 bg-emerald-50 w-max px-1.5 py-0.5 rounded-md">
-                        📍 {c.direccionPuestoMercado} {c.numeroPuesto ? `Puesto ${c.numeroPuesto}` : ""}
+                    
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-bold text-slate-900">{c.nombreCompleto}</p>
+                        <Badge color={est.color}>{est.label}</Badge>
+                      </div>
+                      
+                      {/* Aquí mostramos dinámicamente el Tipo de Documento */}
+                      <p className="truncate text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                        {c.tipoDocumento} {c.dni}
+                        {c.telefono && (
+                          <span className="flex items-center gap-1">
+                            <span className="text-slate-300">|</span> 
+                            {c.telefono}
+                          </span>
+                        )}
                       </p>
-                    )}
+
+                      {(c.numeroPuesto || c.direccionPuestoMercado) && (
+                        <p className="truncate text-[10px] font-semibold text-emerald-600 mt-1 bg-emerald-50 w-max px-1.5 py-0.5 rounded-md">
+                          📍 {c.direccionPuestoMercado} {c.numeroPuesto ? `Puesto ${c.numeroPuesto}` : ""}
+                        </p>
+                      )}
+                    </div>
+                    
+                    <div className="shrink-0 text-right flex flex-col items-end gap-1">
+                      <div className="text-right">
+                         <p className="tnum text-sm font-black" style={{ color: scoreColor(c.historialCrediticioScore) }}>
+                           {c.historialCrediticioScore}
+                         </p>
+                         <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Score</p>
+                      </div>
+
+                      {/* Botón rápido de WhatsApp interactivo (z-10 para que sea clickeable por encima del Link general) */}
+                      {c.telefono && (
+                        <a
+                           href={`https://wa.me/${c.prefijoTelefono.replace("+", "")}${c.telefono}`}
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           className="pointer-events-auto mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-colors"
+                           title={`Enviar WhatsApp a ${c.nombreCompleto}`}
+                        >
+                           <MessageCircle size={14} />
+                        </a>
+                      )}
+                    </div>
                   </div>
-                  
-                  <div className="shrink-0 text-right">
-                    <p className="tnum text-sm font-black" style={{ color: scoreColor(c.historialCrediticioScore) }}>
-                      {c.historialCrediticioScore}
-                    </p>
-                    <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Score</p>
-                  </div>
-                </Link>
+                </div>
               );
             })}
           </div>
         )}
       </div>
 
-      {/* Botón flotante solo visible en Móviles */}
       <button
         onClick={() => navigate("/clientes/nuevo")}
         className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 transition active:scale-95 md:hidden"

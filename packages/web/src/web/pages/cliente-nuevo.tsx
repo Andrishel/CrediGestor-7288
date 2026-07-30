@@ -11,7 +11,9 @@ export default function ClienteNuevoPage() {
   const showToast = useToast();
 
   const [nombreCompleto, setNombreCompleto] = useState("");
+  const [tipoDocumento, setTipoDocumento] = useState("DNI");
   const [dni, setDni] = useState("");
+  const [prefijoTelefono, setPrefijoTelefono] = useState("+51");
   const [telefono, setTelefono] = useState("");
   const [direccionPuesto, setDireccionPuesto] = useState("");
   const [direccionCasa, setDireccionCasa] = useState("");
@@ -23,7 +25,7 @@ export default function ClienteNuevoPage() {
   const guardarCliente = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombreCompleto.trim() || !dni.trim()) {
-      showToast("El nombre y el DNI son obligatorios", "error");
+      showToast("El nombre y el documento son obligatorios", "error");
       return;
     }
 
@@ -34,7 +36,9 @@ export default function ClienteNuevoPage() {
         .insert([
           {
             nombre_completo: nombreCompleto.trim(),
+            tipo_documento: tipoDocumento,
             dni: dni.trim(),
+            prefijo_telefono: prefijoTelefono.trim() || "+51",
             telefono: telefono.trim() || null,
             direccion_puesto: direccionPuesto.trim() || null,
             direccion_casa: direccionCasa.trim() || null,
@@ -62,7 +66,6 @@ export default function ClienteNuevoPage() {
     <AppShell header={<PageHeader title="Nuevo cliente" back="/clientes" />}>
       <form onSubmit={guardarCliente} className="max-w-2xl mx-auto space-y-6 pb-8">
         
-        {/* Datos Personales */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
             <User size={18} className="text-emerald-600" />
@@ -80,28 +83,54 @@ export default function ClienteNuevoPage() {
           </Field>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="DNI / Documento *">
-              <input
-                className={inputClass}
-                placeholder="8 dígitos"
-                value={dni}
-                onChange={(e) => setDni(e.target.value)}
-                required
-              />
-            </Field>
+            <div className="flex gap-2">
+              <div className="w-1/3">
+                <Field label="Tipo">
+                  <select className={inputClass} value={tipoDocumento} onChange={(e) => setTipoDocumento(e.target.value)}>
+                    <option value="DNI">DNI</option>
+                    <option value="CEX">CEX</option>
+                    <option value="PASAPORTE">Pasaporte</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="w-2/3">
+                <Field label="Documento *">
+                  <input
+                    className={inputClass}
+                    placeholder="Número"
+                    value={dni}
+                    onChange={(e) => setDni(e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+            </div>
 
-            <Field label="Teléfono / WhatsApp">
-              <input
-                className={inputClass}
-                placeholder="Ej. 987654321"
-                value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
-              />
-            </Field>
+            <div className="flex gap-2">
+              <div className="w-1/3">
+                <Field label="Cód.">
+                  <input
+                    className={inputClass}
+                    placeholder="+51"
+                    value={prefijoTelefono}
+                    onChange={(e) => setPrefijoTelefono(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className="w-2/3">
+                <Field label="Teléfono / WhatsApp">
+                  <input
+                    className={inputClass}
+                    placeholder="Ej. 987654321"
+                    value={telefono}
+                    onChange={(e) => setTelefono(e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Ubicaciones */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
             <MapPin size={18} className="text-emerald-600" />
@@ -138,7 +167,6 @@ export default function ClienteNuevoPage() {
           </div>
         </div>
 
-        {/* Contacto de Respaldo */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3 text-slate-800">
             <UserCheck size={18} className="text-emerald-600" />

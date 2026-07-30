@@ -82,7 +82,6 @@ export default function Dashboard() {
   const cargarDashboard = async () => {
     setIsLoading(true);
     try {
-      // 1. Préstamos
       const { data: pData } = await supabase
         .from("prestamos")
         .select("monto_desembolsado, saldo_pendiente, estado, interes_porcentaje");
@@ -106,7 +105,6 @@ export default function Dashboard() {
 
       const interesesProyectados = Math.max(0, montoTotalAcumulado - totalPrestado);
 
-      // 2. Pagos de hoy
       const inicioHoy = `${hoyISO}T00:00:00.000Z`;
       const finHoy = `${hoyISO}T23:59:59.999Z`;
 
@@ -121,7 +119,6 @@ export default function Dashboard() {
         cobradoHoy += Number(pg.monto_pagado || 0);
       });
 
-      // 3. Clientes
       const { data: cData } = await supabase.from("clientes").select("id, estado");
       const totalClientes = (cData || []).length;
       const clientesMora = (cData || []).filter((c) => (c.estado || "").toUpperCase() === "MOROSO").length;
@@ -136,7 +133,6 @@ export default function Dashboard() {
         totalPrestamosActivos: activosCount,
       });
 
-      // 4. Ruta de Cobro
       const { data: cuotasData } = await supabase
         .from("cuotas")
         .select(`
@@ -298,7 +294,7 @@ export default function Dashboard() {
   return (
     <>
       <AppShell>
-        <div className={cn("print:hidden", reciboModal && "hidden md:block")}>
+        <div className="print:hidden">
           {isLoading ? (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -310,7 +306,6 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Banner Principal */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
                 <div>
                   <p className="text-xs font-medium text-emerald-400 uppercase tracking-wider">
@@ -329,7 +324,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Tarjetas KPIs */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <KpiCard icon={Wallet} label="Total Desembolsado" valor={formatMoneda(kpis.totalPrestado, moneda)} color="emerald" />
                 <KpiCard icon={TrendingUp} label="Cobrado Hoy" valor={formatMoneda(kpis.cobradoHoy, moneda)} color="blue" />
@@ -337,7 +331,6 @@ export default function Dashboard() {
                 <KpiCard icon={Coins} label="Ganancias Proyectadas" valor={formatMoneda(kpis.interesesProyectados, moneda)} color="purple" />
               </div>
 
-              {/* Avance */}
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2">
@@ -353,12 +346,8 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Grid Principal */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Columna Izquierda: Ruta de Cobro */}
                 <div className="lg:col-span-2 space-y-4">
-                  
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-2">
                       <MapPin size={20} className="text-emerald-600" />
@@ -461,9 +450,7 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* Columna Derecha */}
                 <div className="space-y-6">
-                  
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                     <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                       <Calculator size={20} className="text-slate-700" />
@@ -514,9 +501,7 @@ export default function Dashboard() {
                       <span className="font-bold text-slate-800">{kpis.totalPrestamosActivos}</span>
                     </div>
                   </div>
-
                 </div>
-
               </div>
             </div>
           )}
@@ -526,7 +511,6 @@ export default function Dashboard() {
         {reciboModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:bg-white print:p-0">
             <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-5 text-center print:shadow-none print:p-0">
-              
               <div className="print:hidden mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
                 <CheckCircle2 size={32} />
               </div>
@@ -535,8 +519,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-500">Comprobante oficial generado exitosamente.</p>
               </div>
 
-              {/* Diseño de Ticket a Imprimir */}
-              <div className="rounded-2xl bg-slate-50 p-5 text-left text-xs space-y-3 border border-slate-100 print:border-none print:bg-white print:p-2">
+              <div id="ticket-print" className="rounded-2xl bg-slate-50 p-5 text-left text-xs space-y-3 border border-slate-100 print:border-none print:bg-white print:p-0">
                 <div className="border-b border-slate-300 pb-3 mb-2 text-center">
                   <h2 className="font-display text-xl font-black text-slate-900 tracking-widest uppercase">CrediGestor</h2>
                   <p className="text-[10px] text-slate-500 uppercase mt-0.5">Comprobante de Pago</p>
@@ -589,50 +572,50 @@ export default function Dashboard() {
         )}
       </AppShell>
 
-      {/* HOJA DE RUTA IMPRIMIBLE (Solo se muestra si NO hay un recibo abierto) */}
+      {/* HOJA DE RUTA IMPRIMIBLE (Único bloque visible al imprimir) */}
       {!reciboModal && (
-        <div className="hidden print:block bg-white text-black p-8 font-sans">
-          <div className="border-b-2 border-black pb-4 mb-6">
-            <h1 className="text-3xl font-black uppercase tracking-widest">CrediGestor</h1>
-            <p className="text-lg font-bold mt-1 text-gray-700">Hoja de Ruta de Cobranza Diaria</p>
-            <p className="text-sm mt-1 text-gray-500">Generado el: {formatFechaCompleta(new Date().toISOString())}</p>
-            <p className="text-sm font-bold text-gray-800 mt-2">
+        <div className="hidden print:block bg-white text-black p-4 font-sans">
+          <div className="border-b-2 border-black pb-3 mb-4">
+            <h1 className="text-2xl font-black uppercase tracking-widest">CrediGestor</h1>
+            <p className="text-base font-bold mt-0.5 text-gray-700">Hoja de Ruta de Cobranza Diaria</p>
+            <p className="text-xs mt-0.5 text-gray-500">Generado el: {formatFechaCompleta(new Date().toISOString())}</p>
+            <p className="text-xs font-bold text-gray-800 mt-1">
               Filtro de Zona: {filtroZona === "TODAS" ? "Todos los Mercados" : filtroZona}
             </p>
           </div>
 
-          <table className="w-full text-left text-sm border-collapse">
+          <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-gray-100 border-b-2 border-gray-800">
-                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cliente</th>
-                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Puesto / Zona</th>
-                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Crédito / Cuota</th>
-                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Vencimiento</th>
-                <th className="py-3 px-2 font-bold uppercase text-xs text-right border border-gray-300">Total a Cobrar</th>
-                <th className="py-3 px-2 font-bold uppercase text-xs border border-gray-300">Cobrado (Firma)</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Cliente</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Puesto / Zona</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Crédito / Cuota</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Vencimiento</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] text-right border border-gray-300">Total a Cobrar</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Cobrado (Firma)</th>
               </tr>
             </thead>
             <tbody>
               {rutaFiltrada.map((r) => (
                 <tr key={r.cuotaId} className="border-b border-gray-300">
-                  <td className="py-3 px-2 font-bold text-gray-900 border-x border-gray-300">{r.clienteNombre}</td>
-                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.direccionPuesto || "—"}</td>
-                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">{r.codigoPrestamo} - #{r.numeroCuota}</td>
-                  <td className="py-3 px-2 text-gray-700 border-x border-gray-300">
+                  <td className="py-2 px-2 font-bold text-gray-900 border-x border-gray-300">{r.clienteNombre}</td>
+                  <td className="py-2 px-2 text-gray-700 border-x border-gray-300">{r.direccionPuesto || "—"}</td>
+                  <td className="py-2 px-2 text-gray-700 border-x border-gray-300">{r.codigoPrestamo} - #{r.numeroCuota}</td>
+                  <td className="py-2 px-2 text-gray-700 border-x border-gray-300">
                     {formatFecha(r.fechaVencimiento)} {r.vencida ? `(Mora)` : ""}
                   </td>
-                  <td className="py-3 px-2 text-right font-black border-x border-gray-300 text-lg">
+                  <td className="py-2 px-2 text-right font-black border-x border-gray-300 text-sm">
                     {formatMoneda(r.totalPagar, moneda)}
                   </td>
-                  <td className="py-3 px-2 border-x border-gray-300">
-                    <div className="w-full h-8 border-b border-dashed border-gray-400"></div>
+                  <td className="py-2 px-2 border-x border-gray-300">
+                    <div className="w-full h-6 border-b border-dashed border-gray-400"></div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          <div className="mt-8 flex justify-between text-sm text-gray-600">
+          <div className="mt-6 flex justify-between text-xs text-gray-600">
             <p>Total de visitas agendadas: <strong>{rutaFiltrada.length}</strong></p>
             <p>Proyectado a cobrar hoy: <strong>{formatMoneda(rutaFiltrada.reduce((acc, curr) => acc + curr.totalPagar, 0), moneda)}</strong></p>
           </div>

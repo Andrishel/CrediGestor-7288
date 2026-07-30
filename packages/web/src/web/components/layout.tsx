@@ -21,9 +21,9 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
   ];
 
   return (
-    <div className="min-h-dvh bg-slate-100 text-slate-900 pb-24 md:pb-10">
-      {/* 1. Header Global para Escritorio/Laptop */}
-      <header className="sticky top-0 z-40 w-full bg-slate-900 text-white shadow-lg">
+    <div className="min-h-dvh bg-slate-100 text-slate-900 pb-24 md:pb-10 print:bg-white print:pb-0 print:min-h-0">
+      {/* 1. Header Global para Escritorio/Laptop (Oculto al Imprimir) */}
+      <header className="sticky top-0 z-40 w-full bg-slate-900 text-white shadow-lg print:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
           <Link to="/" className="flex items-center gap-3 cursor-pointer">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 font-display text-xl font-black text-slate-950 shadow-md">
@@ -35,7 +35,6 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
             </div>
           </Link>
 
-          {/* Menú de navegación integrado en pantalla de PC */}
           <nav className="hidden md:flex items-center gap-1 bg-slate-800/60 p-1.5 rounded-2xl border border-slate-700/50">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -60,17 +59,17 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
         </div>
       </header>
 
-      {/* Header secundario de página si existe */}
-      {header && <div className="w-full bg-slate-900 text-white border-t border-slate-800">{header}</div>}
+      {/* Header secundario de página si existe (Oculto al Imprimir) */}
+      {header && <div className="w-full bg-slate-900 text-white border-t border-slate-800 print:hidden">{header}</div>}
 
       {/* 2. Layout Contenedor Ancho para PC (max-w-7xl) */}
-      <div className="mx-auto w-full max-w-7xl px-4 md:px-8 pt-6">
+      <div className="mx-auto w-full max-w-7xl px-4 md:px-8 pt-6 print:p-0 print:m-0 print:max-w-none">
         <main className="w-full">{children}</main>
       </div>
 
-      {/* 3. Navegación Inferior Móvil (Solo para Celular) */}
+      {/* 3. Navegación Inferior Móvil (Oculto al Imprimir) */}
       {!hideNav && (
-        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden print:hidden">
           <div className="mx-auto flex max-w-md justify-around py-2">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -110,7 +109,7 @@ export function PageHeader({
   const [, navigate] = useLocation();
 
   return (
-    <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+    <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 print:hidden">
       <div className="flex items-center gap-3">
         {back && (
           <button

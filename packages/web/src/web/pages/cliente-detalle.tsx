@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { Phone, MapPin, Edit3, Plus, Share2, ShieldAlert, X, Save } from "lucide-react";
+import { Phone, MapPin, Edit3, Plus, Share2, ShieldAlert, X, Save, MessageCircle } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner, Field, inputClass } from "../components/ui/primitives";
 import { formatMoneda, iniciales, scoreColor, scoreBg, cn } from "../lib/utils";
@@ -9,7 +9,9 @@ import { supabase } from "../lib/supabase";
 type ClienteDetalle = {
   id: string;
   nombreCompleto: string;
+  tipoDocumento: string;
   dni: string;
+  prefijoTelefono: string;
   telefono: string | null;
   direccionPuesto: string | null;
   direccionCasa: string | null;
@@ -37,10 +39,11 @@ export default function ClienteDetallePage() {
   const [prestamos, setPrestamos] = useState<PrestamoSimple[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados para el Modal de Edición
   const [editando, setEditando] = useState(false);
   const [formNombre, setFormNombre] = useState("");
+  const [formTipoDoc, setFormTipoDoc] = useState("DNI");
   const [formDni, setFormDni] = useState("");
+  const [formPrefijo, setFormPrefijo] = useState("+51");
   const [formTelefono, setFormTelefono] = useState("");
   const [formPuesto, setFormPuesto] = useState("");
   const [formCasa, setFormCasa] = useState("");
@@ -56,7 +59,6 @@ export default function ClienteDetallePage() {
     if (!id) return;
     setLoading(true);
     try {
-      // 1. Cargar Datos del Cliente
       const { data: cData, error: cErr } = await supabase
         .from("clientes")
         .select("*")
@@ -68,7 +70,9 @@ export default function ClienteDetallePage() {
       const cObj: ClienteDetalle = {
         id: cData.id,
         nombreCompleto: cData.nombre_completo || "",
+        tipoDocumento: cData.tipo_documento || "DNI",
         dni: cData.dni || "",
+        prefijoTelefono: cData.prefijo_telefono || "+51",
         telefono: cData.telefono || null,
         direccionPuesto: cData.direccion_puesto || null,
         direccionCasa: cData.direccion_casa || null,
@@ -81,7 +85,6 @@ export default function ClienteDetallePage() {
 
       setCliente(cObj);
 
-      // 2. Cargar Préstamos del Cliente
       const { data: pData } = await supabase
         .from("prestamos")
         .select("id, codigo_prestamo, monto_desembolsado, saldo_pendiente, estado, fecha_desembolso")
@@ -114,7 +117,9 @@ export default function ClienteDetallePage() {
   const abrirEdicion = () => {
     if (!cliente) return;
     setFormNombre(cliente.nombreCompleto);
+    setFormTipoDoc(cliente.tipoDocumento);
     setFormDni(cliente.dni);
+    setFormPrefijo(cliente.prefijoTelefono);
     setFormTelefono(cliente.telefono || "");
     setFormPuesto(cliente.direccionPuesto || "");
     setFormCasa(cliente.direccionCasa || "");
@@ -134,7 +139,9 @@ export default function ClienteDetallePage() {
         .from("clientes")
         .update({
           nombre_completo: formNombre.trim(),
+          tipo_documento: formTipoDoc,
           dni: formDni.trim(),
+          prefijo_telefono: formPrefijo.trim() || "+51",
           telefono: formTelefono.trim() || null,
           direccion_puesto: formPuesto.trim() || null,
           direccion_casa: formCasa.trim() || null,
@@ -148,7 +155,7 @@ export default function ClienteDetallePage() {
       if (error) throw error;
 
       setEditando(false);
-      await cargarCliente(); // Recargar datos frescos
+      await cargarCliente();
     } catch (err: any) {
       alert("Error al guardar cambios: " + err.message);
     } finally {
@@ -171,7 +178,7 @@ export default function ClienteDetallePage() {
       header={
         <PageHeader
           title={c.nombreCompleto}
-          subtitle={`DNI ${c.dni}`}
+          subtitle={`${c.tipoDocumento} ${c.dni}`}
           back="/clientes"
           right={
             <button
@@ -185,8 +192,6 @@ export default function ClienteDetallePage() {
       }
     >
       <div className="space-y-6 max-w-4xl mx-auto">
-        
-        {/* Card Header del Cliente */}
         <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div
@@ -202,7 +207,24 @@ export default function ClienteDetallePage() {
                   {c.estado}
                 </Badge>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">DNI {c.dni} {c.telefono ? `· Tel. ${c.telefono}` : ""}</p>
+              <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                <span>{c.tipoDocumento} {c.dni}</span>
+                {c.telefono && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="mx-1 text-slate-600">|</span>
+                    Tel. {c.prefijoTelefono} {c.telefono}
+                    <a
+                      href={`https://wa.me/${c.prefijoTelefono.replace("+", "")}${c.telefono}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center bg-emerald-500/20 text-emerald-400 rounded-full p-1.5 hover:bg-emerald-500/40 transition"
+                      title="Enviar mensaje por WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                    </a>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -224,10 +246,7 @@ export default function ClienteDetallePage() {
           </div>
         </div>
 
-        {/* Ficha de Detalles (Grid) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          
-          {/* Ubicaciones */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-2 text-slate-800">
               <MapPin size={18} className="text-emerald-600" />
@@ -240,7 +259,6 @@ export default function ClienteDetallePage() {
             </div>
           </div>
 
-          {/* Contacto de Respaldo */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-2 text-slate-800">
               <Phone size={18} className="text-emerald-600" />
@@ -262,10 +280,8 @@ export default function ClienteDetallePage() {
               )}
             </div>
           </div>
-
         </div>
 
-        {/* Historial de Créditos del Cliente */}
         <div className="space-y-3">
           <h2 className="font-display text-base font-bold text-slate-900">Historial de Créditos</h2>
           {prestamos.length === 0 ? (
@@ -295,10 +311,8 @@ export default function ClienteDetallePage() {
             </div>
           )}
         </div>
-
       </div>
 
-      {/* MODAL DE EDICIÓN (CRUD Completo) */}
       {editando && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl space-y-5">
@@ -310,18 +324,40 @@ export default function ClienteDetallePage() {
             </div>
 
             <form onSubmit={guardarCambios} className="space-y-4">
-              
               <Field label="Nombre Completo">
                 <input className={inputClass} value={formNombre} onChange={(e) => setFormNombre(e.target.value)} required />
               </Field>
 
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="DNI">
-                  <input className={inputClass} value={formDni} onChange={(e) => setFormDni(e.target.value)} required />
-                </Field>
-                <Field label="Teléfono / WhatsApp">
-                  <input className={inputClass} value={formTelefono} onChange={(e) => setFormTelefono(e.target.value)} />
-                </Field>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex gap-2">
+                  <div className="w-1/3">
+                    <Field label="Tipo">
+                      <select className={inputClass} value={formTipoDoc} onChange={(e) => setFormTipoDoc(e.target.value)}>
+                        <option value="DNI">DNI</option>
+                        <option value="CEX">CEX</option>
+                        <option value="PASAPORTE">Pasaporte</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <div className="w-2/3">
+                    <Field label="Documento *">
+                      <input className={inputClass} value={formDni} onChange={(e) => setFormDni(e.target.value)} required />
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="w-1/3">
+                    <Field label="Cód.">
+                      <input className={inputClass} value={formPrefijo} onChange={(e) => setFormPrefijo(e.target.value)} />
+                    </Field>
+                  </div>
+                  <div className="w-2/3">
+                    <Field label="Teléfono / WhatsApp">
+                      <input className={inputClass} value={formTelefono} onChange={(e) => setFormTelefono(e.target.value)} />
+                    </Field>
+                  </div>
+                </div>
               </div>
 
               <div className="border-t border-slate-100 pt-2" />
@@ -330,7 +366,7 @@ export default function ClienteDetallePage() {
                 <input className={inputClass} value={formPuesto} onChange={(e) => setFormPuesto(e.target.value)} />
               </Field>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Field label="Dirección Casa">
                   <input className={inputClass} value={formCasa} onChange={(e) => setFormCasa(e.target.value)} />
                 </Field>
@@ -341,7 +377,7 @@ export default function ClienteDetallePage() {
 
               <div className="border-t border-slate-100 pt-2" />
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Field label="Nombre de Respaldo">
                   <input className={inputClass} value={formContactoNombre} onChange={(e) => setFormContactoNombre(e.target.value)} />
                 </Field>
