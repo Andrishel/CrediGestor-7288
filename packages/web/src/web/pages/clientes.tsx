@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Search, Plus, Users } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { CardSkeleton, EmptyState, Badge, Button } from "../components/ui/primitives";
-import { iniciales, scoreColor, scoreBg, cn } from "../lib/utils";
+import { iniciales, scoreColor, scoreBg } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 
 type Cliente = {

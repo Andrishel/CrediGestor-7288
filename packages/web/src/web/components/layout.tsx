@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Home, Users, FileText, Settings, ChevronLeft, LogOut } from "lucide-react";
+import { Home, Users, FileText, Settings, ChevronLeft } from "lucide-react";
 import { cn } from "../lib/utils";
 
 interface AppShellProps {
