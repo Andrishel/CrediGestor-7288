@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Settings, Wallet, CheckCircle2 } from "lucide-react";
+import { Settings, Wallet, CheckCircle2, LogOut } from "lucide-react";
+import { useLocation } from "wouter";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass, Spinner } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
 import { cn } from "../lib/utils";
+import { supabase } from "../lib/supabase";
 
 type Tab = "general" | "cobro";
 type Frec = "diario" | "semanal" | "mensual";
@@ -60,6 +62,7 @@ const defaultConfigGeneral = {
 
 function GeneralForm() {
   const showToast = useToast();
+  const [, setLocation] = useLocation();
   const [f, setF] = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -171,6 +174,20 @@ function GeneralForm() {
       <Button className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md cursor-pointer" loading={saving} onClick={guardar}>
         Guardar Cambios
       </Button>
+
+      {/* Botón de Salir integrado correctamente dentro del componente */}
+      <div className="pt-6 border-t border-slate-200">
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            localStorage.clear();
+            setLocation("/sign-in");
+          }}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-red-50 border border-red-200 py-3.5 text-sm font-bold text-red-600 hover:bg-red-100 transition cursor-pointer"
+        >
+          <LogOut size={18} /> Cerrar Sesión
+        </button>
+      </div>
     </div>
   );
 }
@@ -224,9 +241,9 @@ function CobroForm() {
       <Section titulo="Código QR del Sistema">
         <div className="text-center p-4 bg-slate-50 rounded-2xl border border-slate-200">
           <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-700 mb-3">
-            <CheckCircle2 size={16} /> QR Local Activo (/public/qr-yape.png)
+            <CheckCircle2 size={16} /> QR Local Activo (/public/qr-yape.jpeg)
           </div>
-          <img src="/qr-yape.png" alt="QR Yape" className="mx-auto h-44 w-44 object-contain rounded-xl border border-slate-200 shadow-sm" />
+          <img src="/qr-yape.jpeg" alt="QR Yape" className="mx-auto h-44 w-44 object-contain rounded-xl border border-slate-200 shadow-sm" />
           <p className="text-[11px] text-slate-500 mt-3 font-medium">
             Este es el código QR estático compilado en la aplicación para agilizar los cobros.
           </p>

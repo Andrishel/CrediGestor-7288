@@ -11,6 +11,26 @@ interface AppShellProps {
   hideNav?: boolean;
 }
 
+export function BotonCerrarSesion() {
+  const [, setLocation] = useLocation();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setLocation("/sign-in");
+  };
+
+  return (
+    <button
+      onClick={handleLogout}
+      className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-red-600 shadow-sm hover:bg-red-50 hover:border-red-200 transition cursor-pointer"
+      title="Cerrar sesión"
+    >
+      <LogOut size={16} />
+      <span className="hidden sm:inline">Salir</span>
+    </button>
+  );
+}
+
 export function AppShell({ children, header, hideNav = false }: AppShellProps) {
   const [location, setLocation] = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -110,7 +130,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
               );
             })}
 
-            {/* Botón de Salir Móvil */}
+            {/* Botón de Salir Móvil con Modal */}
             <button
               onClick={() => setShowLogoutModal(true)}
               className="flex flex-col items-center gap-1 px-3 py-1 text-xs font-medium text-rose-500 hover:text-rose-700 transition cursor-pointer"
