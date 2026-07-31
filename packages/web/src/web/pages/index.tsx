@@ -62,6 +62,10 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [cobrandoId, setCobrandoId] = useState<string | null>(null);
 
+  // Estados para el Modal de Cobro Rápido
+  const [itemCobrar, setItemCobrar] = useState<RutaItem | null>(null);
+  const [metodoCobro, setMetodoCobro] = useState<string>("EFECTIVO");
+
   const [filtroZona, setFiltroZona] = useState<string>("TODAS");
   const [reciboModal, setReciboModal] = useState<{
     clienteNombre: string;
@@ -70,6 +74,7 @@ export default function Dashboard() {
     codigo: string;
     operacionId: string;
     fechaHora: string;
+    metodoPago: string; // <-- Nuevo campo para el recibo
   } | null>(null);
 
   const [simMonto, setSimMonto] = useState("500");
@@ -82,14 +87,8 @@ export default function Dashboard() {
   const cargarDashboard = async () => {
     setIsLoading(true);
     try {
-      const { data: pData } = await supabase
-        .from("prestamos")
-        .select("monto_desembolsado, saldo_pendiente, estado, interes_porcentaje");
-
-      let totalPrestado = 0;
-      let pendienteCobro = 0;
-      let montoTotalAcumulado = 0;
-      let activosCount = 0;
+      const { data: pData } = await supabase.from("prestamos").select("monto_desembolsado, saldo_pendiente, estado, interes_porcentaje");
+      let totalPrestado = 0, pendienteCobro = 0, montoTotalAcumulado = 0, activosCount = 0;
 
       (pData || []).forEach((p) => {
         const desemb = Number(p.monto_desembolsado || 0);
@@ -104,99 +103,64 @@ export default function Dashboard() {
       });
 
       const interesesProyectados = Math.max(0, montoTotalAcumulado - totalPrestado);
-
       const inicioHoy = `${hoyISO}T00:00:00.000Z`;
       const finHoy = `${hoyISO}T23:59:59.999Z`;
 
-      const { data: pagosData } = await supabase
-        .from("pagos")
-        .select("monto_pagado")
-        .gte("fecha_pago", inicioHoy)
-        .lte("fecha_pago", finHoy);
-
+      const { data: pagosData } = await supabase.from("pagos").select("monto_pagado").gte("fecha_pago", inicioHoy).lte("fecha_pago", finHoy);
       let cobradoHoy = 0;
-      (pagosData || []).forEach((pg) => {
-        cobradoHoy += Number(pg.monto_pagado || 0);
-      });
+      (pagosData || []).forEach((pg) => { cobradoHoy += Number(pg.monto_pagado || 0); });
 
       const { data: cData } = await supabase.from("clientes").select("id, estado");
       const totalClientes = (cData || []).length;
       const clientesMora = (cData || []).filter((c) => (c.estado || "").toUpperCase() === "MOROSO").length;
 
-      setKpis({
-        totalPrestado,
-        cobradoHoy,
-        pendienteCobro,
-        interesesProyectados,
-        clientesMora,
-        totalClientes,
-        totalPrestamosActivos: activosCount,
-      });
+      setKpis({ totalPrestado, cobradoHoy, pendienteCobro, interesesProyectados, clientesMora, totalClientes, totalPrestamosActivos: activosCount });
 
       const { data: cuotasData } = await supabase
         .from("cuotas")
-        .select(`
-          id, numero_cuota, fecha_vencimiento, monto_cuota, mora_acumulada, estado,
-          prestamos ( id, codigo_prestamo, clientes ( nombre_completo, direccion_puesto ) )
-        `)
+        .select(`id, numero_cuota, fecha_vencimiento, monto_cuota, mora_acumulada, estado, prestamos ( id, codigo_prestamo, clientes ( nombre_completo, direccion_puesto ) )`)
         .neq("estado", "PAGADO")
         .order("fecha_vencimiento", { ascending: true });
 
       const rutaFormateada: RutaItem[] = (cuotasData || []).map((cu: any) => {
         const pObj = Array.isArray(cu.prestamos) ? cu.prestamos[0] : cu.prestamos;
         const cObj = pObj && (Array.isArray(pObj.clientes) ? pObj.clientes[0] : pObj.clientes);
-
         const fechaVencStr = cu.fecha_vencimiento || hoyISO;
         const esVencida = fechaVencStr < hoyISO;
 
-        let diasRetraso = 0;
-        let moraCalculada = Number(cu.mora_acumulada || 0);
-
+        let diasRetraso = 0, moraCalculada = Number(cu.mora_acumulada || 0);
         if (esVencida) {
           const diffMs = new Date(hoyISO).getTime() - new Date(fechaVencStr).getTime();
           diasRetraso = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-          const montoBase = Number(cu.monto_cuota || 0);
-          moraCalculada = Math.round(montoBase * TASA_MORA_DIARIA * diasRetraso * 100) / 100;
+          moraCalculada = Math.round(Number(cu.monto_cuota || 0) * TASA_MORA_DIARIA * diasRetraso * 100) / 100;
         }
-
-        const montoBase = Number(cu.monto_cuota || 0);
-        const codigoPres = pObj?.codigo_prestamo || `PRES-${(pObj?.id || "").substring(0, 6).toUpperCase()}`;
 
         return {
           cuotaId: cu.id,
           prestamoId: pObj?.id || "",
           clienteNombre: cObj?.nombre_completo || "Cliente",
-          codigoPrestamo: codigoPres,
+          codigoPrestamo: pObj?.codigo_prestamo || `PRES-${(pObj?.id || "").substring(0, 6).toUpperCase()}`,
           numeroCuota: cu.numero_cuota,
           direccionPuesto: cObj?.direccion_puesto || "General",
-          montoCuota: montoBase,
+          montoCuota: Number(cu.monto_cuota || 0),
           diasRetraso,
           moraCalculada,
-          totalPagar: montoBase + moraCalculada,
+          totalPagar: Number(cu.monto_cuota || 0) + moraCalculada,
           vencida: esVencida,
           fechaVencimiento: fechaVencStr,
         };
       });
 
       setRuta(rutaFormateada);
-    } catch (err: any) {
-      console.error("Error al cargar Dashboard:", err.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err: any) { console.error("Error al cargar Dashboard:", err.message); } 
+    finally { setIsLoading(false); }
   };
 
-  useEffect(() => {
-    cargarDashboard();
-  }, []);
+  useEffect(() => { cargarDashboard(); }, []);
 
   const zonasDisponibles = useMemo(() => {
     const zonas = new Set<string>();
-    ruta.forEach((r) => {
-      if (r.direccionPuesto && r.direccionPuesto !== "General") {
-        zonas.add(r.direccionPuesto.split("-")[0].trim());
-      }
-    });
+    ruta.forEach((r) => { if (r.direccionPuesto && r.direccionPuesto !== "General") zonas.add(r.direccionPuesto.split("-")[0].trim()); });
     return Array.from(zonas);
   }, [ruta]);
 
@@ -205,79 +169,61 @@ export default function Dashboard() {
     return ruta.filter((r) => (r.direccionPuesto || "").toLowerCase().includes(filtroZona.toLowerCase()));
   }, [ruta, filtroZona]);
 
-  const realizarCobro = async (item: RutaItem) => {
-    setCobrandoId(item.cuotaId);
+  const procesarCobroFinal = async () => {
+    if (!itemCobrar) return;
+    setCobrandoId(itemCobrar.cuotaId);
     try {
       const operacionId = `OP-${Math.floor(Math.random() * 10000000).toString(16).toUpperCase()}`;
       const fechaActual = new Date().toISOString();
 
-      const { error: pErr } = await supabase.from("pagos").insert([
-        {
-          prestamo_id: item.prestamoId,
-          cuota_id: item.cuotaId,
-          monto_pagado: item.totalPagar,
-          metodo_pago: "EFECTIVO",
+      const { error: pErr } = await supabase.from("pagos").insert([{
+          prestamo_id: itemCobrar.prestamoId,
+          cuota_id: itemCobrar.cuotaId,
+          monto_pagado: itemCobrar.totalPagar,
+          metodo_pago: metodoCobro, // <-- Usamos el método escogido por el usuario
           fecha_pago: fechaActual,
           numero_operacion: operacionId,
-        },
-      ]);
+      }]);
       if (pErr) throw pErr;
 
-      const { error: cErr } = await supabase
-        .from("cuotas")
-        .update({ 
+      await supabase.from("cuotas").update({ 
           estado: "PAGADO", 
-          monto_abonado: item.montoCuota,
+          monto_abonado: itemCobrar.montoCuota,
           saldo_cuota: 0,
-          mora_acumulada: item.moraCalculada 
-        })
-        .eq("id", item.cuotaId);
-      if (cErr) throw cErr;
+          mora_acumulada: itemCobrar.moraCalculada 
+        }).eq("id", itemCobrar.cuotaId);
 
-      const { data: pActual } = await supabase
-        .from("prestamos")
-        .select("saldo_pendiente")
-        .eq("id", item.prestamoId)
-        .single();
-
+      const { data: pActual } = await supabase.from("prestamos").select("saldo_pendiente").eq("id", itemCobrar.prestamoId).single();
       let nuevoSaldo = 0;
       if (pActual) {
-        nuevoSaldo = Math.max(0, Number(pActual.saldo_pendiente || 0) - item.totalPagar);
-        await supabase
-          .from("prestamos")
-          .update({
+        nuevoSaldo = Math.max(0, Number(pActual.saldo_pendiente || 0) - itemCobrar.totalPagar);
+        await supabase.from("prestamos").update({
             saldo_pendiente: nuevoSaldo,
             estado: nuevoSaldo === 0 ? "CANCELADO" : "ACTIVO",
-          })
-          .eq("id", item.prestamoId);
+          }).eq("id", itemCobrar.prestamoId);
       }
 
+      setItemCobrar(null); // Cerramos el modal de confirmación rápida
       setReciboModal({
-        clienteNombre: item.clienteNombre,
-        montoPagado: item.totalPagar,
+        clienteNombre: itemCobrar.clienteNombre,
+        montoPagado: itemCobrar.totalPagar,
         saldoRestante: nuevoSaldo,
-        codigo: item.codigoPrestamo,
+        codigo: itemCobrar.codigoPrestamo,
         operacionId,
         fechaHora: fechaActual,
+        metodoPago: metodoCobro, // <-- Enviamos el método al recibo oficial
       });
-
       await cargarDashboard();
-    } catch (err: any) {
-      alert("Error en el cobro: " + err.message);
-    } finally {
-      setCobrandoId(null);
-    }
+    } catch (err: any) { alert("Error en el cobro: " + err.message); } 
+    finally { setCobrandoId(null); }
   };
 
   const exportarExcel = () => {
     if (rutaFiltrada.length === 0) return alert("No hay cuotas registradas para exportar.");
     let csvContent = "data:text/csv;charset=utf-8,\uFEFFCliente,Prestamo,Cuota,Vencimiento,Direccion,Monto,Mora,Total,Estado\n";
-    rutaFiltrada.forEach((r) => {
-      csvContent += `"${r.clienteNombre}","${r.codigoPrestamo}",${r.numeroCuota},"${r.fechaVencimiento}","${r.direccionPuesto}",${r.montoCuota},${r.moraCalculada},${r.totalPagar},"${r.vencida ? "Vencida" : "Pendiente"}"\n`;
-    });
-    const encodedUri = encodeURI(csvContent);
+    rutaFiltrada.forEach((r) => { csvContent += `"${r.clienteNombre}","${r.codigoPrestamo}",${r.numeroCuota},"${r.fechaVencimiento}","${r.direccionPuesto}",${r.montoCuota},${r.moraCalculada},${r.totalPagar},"${r.vencida ? "Vencida" : "Pendiente"}"\n`; });
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", encodeURI(csvContent));
     link.setAttribute("download", `Reporte_Cobranza_${hoyISO}.csv`);
     document.body.appendChild(link);
     link.click();
@@ -286,10 +232,7 @@ export default function Dashboard() {
 
   const totalRecuperado = Math.max(0, kpis.totalPrestado - kpis.pendienteCobro);
   const porcentajeCobro = kpis.totalPrestado > 0 ? Math.round((totalRecuperado / kpis.totalPrestado) * 100) : 100;
-
-  const valMonto = Number(simMonto) || 0;
-  const valCuotas = Number(simCuotas) || 1;
-  const cuotaEstimada = Math.round(((valMonto * 1.10) / valCuotas) * 100) / 100;
+  const cuotaEstimada = Math.round((((Number(simMonto) || 0) * 1.10) / (Number(simCuotas) || 1)) * 100) / 100;
 
   return (
     <>
@@ -298,9 +241,7 @@ export default function Dashboard() {
           {isLoading ? (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-200" />
-                ))}
+                {[0, 1, 2, 3].map((i) => (<div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-200" />))}
               </div>
               <CardSkeleton />
             </div>
@@ -308,19 +249,13 @@ export default function Dashboard() {
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
                 <div>
-                  <p className="text-xs font-medium text-emerald-400 uppercase tracking-wider">
-                    {formatFechaCompleta(new Date().toISOString())}
-                  </p>
+                  <p className="text-xs font-medium text-emerald-400 uppercase tracking-wider">{formatFechaCompleta(new Date().toISOString())}</p>
                   <h1 className="font-display text-2xl md:text-3xl font-bold mt-1">Panel de Control General</h1>
                   <p className="text-sm text-slate-400 mt-0.5">Gestión integral de cartera y cobros diarios.</p>
                 </div>
                 <div className="flex flex-wrap gap-2.5">
-                  <Button onClick={() => navigate("/clientes/nuevo")} className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700">
-                    <UserPlus size={16} /> + Cliente
-                  </Button>
-                  <Button onClick={() => navigate("/prestamos/nuevo")} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold">
-                    <FilePlus2 size={16} /> + Préstamo
-                  </Button>
+                  <Button onClick={() => navigate("/clientes/nuevo")} className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700"><UserPlus size={16} /> + Cliente</Button>
+                  <Button onClick={() => navigate("/prestamos/nuevo")} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"><FilePlus2 size={16} /> + Préstamo</Button>
                 </div>
               </div>
 
@@ -337,9 +272,7 @@ export default function Dashboard() {
                     <PieChart size={20} className="text-emerald-600" />
                     <h3 className="font-display text-base font-bold text-slate-800">Recuperación de Cartera</h3>
                   </div>
-                  <span className="text-sm font-semibold text-slate-600">
-                    {porcentajeCobro}% Recaudado ({formatMoneda(totalRecuperado, moneda)} / {formatMoneda(kpis.totalPrestado, moneda)})
-                  </span>
+                  <span className="text-sm font-semibold text-slate-600">{porcentajeCobro}% Recaudado ({formatMoneda(totalRecuperado, moneda)} / {formatMoneda(kpis.totalPrestado, moneda)})</span>
                 </div>
                 <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
                   <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${porcentajeCobro}%` }} />
@@ -362,31 +295,11 @@ export default function Dashboard() {
                         className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
                       >
                         <option value="TODAS">📍 Todos los mercados</option>
-                        {zonasDisponibles.map((z) => (
-                          <option key={z} value={z}>{z}</option>
-                        ))}
+                        {zonasDisponibles.map((z) => (<option key={z} value={z}>{z}</option>))}
                       </select>
 
-                      <button
-                        onClick={exportarExcel}
-                        className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition"
-                        title="Exportar a Excel"
-                      >
-                        <FileSpreadsheet size={15} />
-                        <span className="hidden sm:inline">Excel</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (rutaFiltrada.length === 0) return alert("No hay datos para imprimir.");
-                          window.print();
-                        }}
-                        className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
-                        title="Imprimir Hoja de Ruta"
-                      >
-                        <Printer size={15} />
-                        <span className="hidden sm:inline">Ruta</span>
-                      </button>
+                      <button onClick={exportarExcel} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 transition" title="Exportar a Excel"><FileSpreadsheet size={15} /><span className="hidden sm:inline">Excel</span></button>
+                      <button onClick={() => { if (rutaFiltrada.length === 0) return alert("No hay datos para imprimir."); window.print(); }} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition" title="Imprimir Hoja de Ruta"><Printer size={15} /><span className="hidden sm:inline">Ruta</span></button>
                     </div>
                   </div>
 
@@ -399,33 +312,15 @@ export default function Dashboard() {
                   ) : (
                     <div className="space-y-3">
                       {rutaFiltrada.map((r) => (
-                        <div
-                          key={r.cuotaId}
-                          className={cn(
-                            "flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border bg-white p-4 shadow-sm transition hover:border-emerald-500",
-                            r.vencida ? "border-red-300 bg-red-50/20" : "border-slate-200"
-                          )}
-                        >
+                        <div key={r.cuotaId} className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border bg-white p-4 shadow-sm transition hover:border-emerald-500", r.vencida ? "border-red-300 bg-red-50/20" : "border-slate-200")}>
                           <div className="flex items-center gap-3.5 min-w-0">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 font-display text-base font-bold text-emerald-400">
-                              {iniciales(r.clienteNombre)}
-                            </div>
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 font-display text-base font-bold text-emerald-400">{iniciales(r.clienteNombre)}</div>
                             <div className="min-w-0">
                               <p className="truncate text-base font-bold text-slate-900">{r.clienteNombre}</p>
-                              <p className="truncate text-xs text-slate-500 mt-0.5">
-                                Cuota #{r.numeroCuota} · {r.codigoPrestamo} · Vence: {formatFecha(r.fechaVencimiento)}
-                              </p>
+                              <p className="truncate text-xs text-slate-500 mt-0.5">Cuota #{r.numeroCuota} · {r.codigoPrestamo} · Vence: {formatFecha(r.fechaVencimiento)}</p>
                               <div className="flex items-center gap-2 mt-1">
-                                {r.vencida ? (
-                                  <Badge color="danger">Mora ({r.diasRetraso} días)</Badge>
-                                ) : (
-                                  <Badge color="warning">Pendiente</Badge>
-                                )}
-                                {r.moraCalculada > 0 && (
-                                  <span className="text-xs font-bold text-red-600">
-                                    +{formatMoneda(r.moraCalculada, moneda)} mora
-                                  </span>
-                                )}
+                                {r.vencida ? (<Badge color="danger">Mora ({r.diasRetraso} días)</Badge>) : (<Badge color="warning">Pendiente</Badge>)}
+                                {r.moraCalculada > 0 && (<span className="text-xs font-bold text-red-600">+{formatMoneda(r.moraCalculada, moneda)} mora</span>)}
                               </div>
                             </div>
                           </div>
@@ -438,7 +333,7 @@ export default function Dashboard() {
                             <Button
                               variant="success"
                               loading={cobrandoId === r.cuotaId}
-                              onClick={() => realizarCobro(r)}
+                              onClick={() => { setMetodoCobro("EFECTIVO"); setItemCobrar(r); }} // <-- Abre el modal de confirmación rápida
                               className="px-4 py-2.5 font-bold shadow-sm"
                             >
                               Cobrar
@@ -452,54 +347,17 @@ export default function Dashboard() {
 
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                      <Calculator size={20} className="text-slate-700" />
-                      <h3 className="font-display text-base font-bold text-slate-800">Simulador Rápido</h3>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-slate-500">Monto a prestar ({moneda})</label>
-                      <input
-                        type="number"
-                        value={simMonto}
-                        onChange={(e) => setSimMonto(e.target.value)}
-                        className="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-slate-500">N° de Cuotas (con 10% Interés)</label>
-                      <input
-                        type="number"
-                        value={simCuotas}
-                        onChange={(e) => setSimCuotas(e.target.value)}
-                        className="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3.5 flex items-center justify-between border border-slate-100">
-                      <span className="text-xs font-medium text-slate-600">Cuota sugerida:</span>
-                      <span className="font-display text-lg font-black text-slate-900">{formatMoneda(cuotaEstimada, moneda)}</span>
-                    </div>
-
-                    <Button onClick={() => navigate("/prestamos/nuevo")} className="w-full">
-                      Crear Préstamo
-                    </Button>
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-3"><Calculator size={20} className="text-slate-700" /><h3 className="font-display text-base font-bold text-slate-800">Simulador Rápido</h3></div>
+                    <div><label className="text-xs font-medium text-slate-500">Monto a prestar ({moneda})</label><input type="number" value={simMonto} onChange={(e) => setSimMonto(e.target.value)} className="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500" /></div>
+                    <div><label className="text-xs font-medium text-slate-500">N° de Cuotas (con 10% Interés)</label><input type="number" value={simCuotas} onChange={(e) => setSimCuotas(e.target.value)} className="w-full mt-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500" /></div>
+                    <div className="rounded-xl bg-slate-50 p-3.5 flex items-center justify-between border border-slate-100"><span className="text-xs font-medium text-slate-600">Cuota sugerida:</span><span className="font-display text-lg font-black text-slate-900">{formatMoneda(cuotaEstimada, moneda)}</span></div>
+                    <Button onClick={() => navigate("/prestamos/nuevo")} className="w-full">Crear Préstamo</Button>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
-                    <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-                      <ShieldCheck size={20} className="text-emerald-600" />
-                      <h3 className="font-display text-base font-bold text-slate-800">Estado de Cartera</h3>
-                    </div>
-                    <div className="flex justify-between text-sm py-1 border-b border-slate-50">
-                      <span className="text-slate-500">Clientes registrados:</span>
-                      <span className="font-bold text-slate-800">{kpis.totalClientes}</span>
-                    </div>
-                    <div className="flex justify-between text-sm py-1 border-b border-slate-50">
-                      <span className="text-slate-500">Préstamos activos:</span>
-                      <span className="font-bold text-slate-800">{kpis.totalPrestamosActivos}</span>
-                    </div>
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-2"><ShieldCheck size={20} className="text-emerald-600" /><h3 className="font-display text-base font-bold text-slate-800">Estado de Cartera</h3></div>
+                    <div className="flex justify-between text-sm py-1 border-b border-slate-50"><span className="text-slate-500">Clientes registrados:</span><span className="font-bold text-slate-800">{kpis.totalClientes}</span></div>
+                    <div className="flex justify-between text-sm py-1 border-b border-slate-50"><span className="text-slate-500">Préstamos activos:</span><span className="font-bold text-slate-800">{kpis.totalPrestamosActivos}</span></div>
                   </div>
                 </div>
               </div>
@@ -507,17 +365,55 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Modal Recibo Oficial */}
+        {/* MODAL COBRO RÁPIDO YAPE/EFECTIVO (Ruta) */}
+        {itemCobrar && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:hidden">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="font-display text-lg font-bold text-slate-900">Confirmar Cobro</h3>
+                <button onClick={() => setItemCobrar(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition"><X size={20} /></button>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-900 px-5 py-3 text-white shadow-md">
+                <span className="text-xs font-medium text-slate-400">A Cobrar</span>
+                <span className="tnum font-display text-2xl font-black text-emerald-400">{formatMoneda(itemCobrar.totalPagar, moneda)}</span>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                <p className="text-xs font-bold text-slate-700 mb-1">Método de cobro</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {["EFECTIVO", "YAPE", "PLIN"].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMetodoCobro(m)}
+                      className={cn("rounded-xl border py-2 text-xs font-bold transition", metodoCobro === m ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-sm" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100")}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                {(metodoCobro === "YAPE" || metodoCobro === "PLIN") && (
+                  <div className="animate-fade-in rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center mt-2 shadow-inner">
+                    <img src="/qr-yape.png" alt="QR Local" className="mx-auto h-32 w-32 object-contain rounded-xl" />
+                    <p className="mt-2 text-[10px] font-medium text-slate-500">Verifica la notificación antes de cobrar.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-3">
+                <Button variant="outline" className="py-3" onClick={() => setItemCobrar(null)}>Cancelar</Button>
+                <Button loading={cobrandoId === itemCobrar.cuotaId} onClick={procesarCobroFinal} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold">Cobrar</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Recibo Oficial Visual */}
         {reciboModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:bg-white print:p-0">
             <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-5 text-center print:shadow-none print:p-0">
-              <div className="print:hidden mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                <CheckCircle2 size={32} />
-              </div>
-              <div className="print:hidden">
-                <h3 className="font-display text-lg font-bold text-slate-900">¡Pago Registrado!</h3>
-                <p className="text-xs text-slate-500">Comprobante oficial generado exitosamente.</p>
-              </div>
+              <div className="print:hidden mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 size={32} /></div>
+              <div className="print:hidden"><h3 className="font-display text-lg font-bold text-slate-900">¡Pago Registrado!</h3><p className="text-xs text-slate-500">Comprobante oficial generado exitosamente.</p></div>
 
               <div id="ticket-print" className="rounded-2xl bg-slate-50 p-5 text-left text-xs space-y-3 border border-slate-100 print:border-none print:bg-white print:p-0">
                 <div className="border-b border-slate-300 pb-3 mb-2 text-center">
@@ -530,6 +426,7 @@ export default function Dashboard() {
                   <p className="flex justify-between"><span>Crédito:</span> <strong>{reciboModal.codigo}</strong></p>
                   <p className="flex justify-between"><span>Cliente:</span> <strong className="truncate max-w-[150px]">{reciboModal.clienteNombre}</strong></p>
                   <p className="flex justify-between"><span>Fecha/Hora:</span> <strong>{formatFechaCompleta(reciboModal.fechaHora)}</strong></p>
+                  <p className="flex justify-between items-center border-t border-slate-200 mt-2 pt-2"><span>Método:</span> <strong className="uppercase font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">{reciboModal.metodoPago}</strong></p>
                 </div>
 
                 <div className="border-t border-b border-dashed border-slate-300 py-3 my-2 text-center">
@@ -548,49 +445,36 @@ export default function Dashboard() {
               </div>
 
               <div className="grid grid-cols-3 gap-2 print:hidden">
-                <Button variant="outline" onClick={() => setReciboModal(null)} className="px-2">
-                  <X size={18} />
-                </Button>
-                <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold" onClick={() => window.print()}>
-                  <Printer size={15} /> Imprimir
-                </Button>
+                <Button variant="outline" onClick={() => setReciboModal(null)} className="px-2"><X size={18} /></Button>
+                <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold" onClick={() => window.print()}><Printer size={15} /> Imprimir</Button>
                 <Button
                   className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
                   onClick={() => {
-                    const msg = encodeURIComponent(
-                      `*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${reciboModal.clienteNombre}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${reciboModal.operacionId}\n*Crédito:* ${reciboModal.codigo}\n*Abono:* ${formatMoneda(reciboModal.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(reciboModal.saldoRestante, moneda)}\n*Fecha:* ${formatFechaCompleta(reciboModal.fechaHora)}\n\n¡Gracias por tu responsabilidad!`
-                    );
+                    const msg = encodeURIComponent(`*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${reciboModal.clienteNombre}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${reciboModal.operacionId}\n*Crédito:* ${reciboModal.codigo}\n*Vía:* ${reciboModal.metodoPago}\n*Abono:* ${formatMoneda(reciboModal.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(reciboModal.saldoRestante, moneda)}\n*Fecha:* ${formatFechaCompleta(reciboModal.fechaHora)}\n\n¡Gracias por tu responsabilidad!`);
                     window.open(`https://wa.me/?text=${msg}`, "_blank");
                     setReciboModal(null);
                   }}
-                >
-                  <Share2 size={15} /> Enviar
-                </Button>
+                ><Share2 size={15} /> Enviar</Button>
               </div>
             </div>
           </div>
         )}
       </AppShell>
 
-      {/* HOJA DE RUTA IMPRIMIBLE (Único bloque visible al imprimir) */}
+      {/* HOJA DE RUTA IMPRIMIBLE */}
       {!reciboModal && (
         <div className="hidden print:block bg-white text-black p-4 font-sans">
           <div className="border-b-2 border-black pb-3 mb-4">
             <h1 className="text-2xl font-black uppercase tracking-widest">CrediGestor</h1>
             <p className="text-base font-bold mt-0.5 text-gray-700">Hoja de Ruta de Cobranza Diaria</p>
             <p className="text-xs mt-0.5 text-gray-500">Generado el: {formatFechaCompleta(new Date().toISOString())}</p>
-            <p className="text-xs font-bold text-gray-800 mt-1">
-              Filtro de Zona: {filtroZona === "TODAS" ? "Todos los Mercados" : filtroZona}
-            </p>
           </div>
 
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-gray-100 border-b-2 border-gray-800">
                 <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Cliente</th>
-                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Puesto / Zona</th>
-                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Crédito / Cuota</th>
-                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Vencimiento</th>
+                <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Zona</th>
                 <th className="py-2 px-2 font-bold uppercase text-[10px] text-right border border-gray-300">Total a Cobrar</th>
                 <th className="py-2 px-2 font-bold uppercase text-[10px] border border-gray-300">Cobrado (Firma)</th>
               </tr>
@@ -600,25 +484,12 @@ export default function Dashboard() {
                 <tr key={r.cuotaId} className="border-b border-gray-300">
                   <td className="py-2 px-2 font-bold text-gray-900 border-x border-gray-300">{r.clienteNombre}</td>
                   <td className="py-2 px-2 text-gray-700 border-x border-gray-300">{r.direccionPuesto || "—"}</td>
-                  <td className="py-2 px-2 text-gray-700 border-x border-gray-300">{r.codigoPrestamo} - #{r.numeroCuota}</td>
-                  <td className="py-2 px-2 text-gray-700 border-x border-gray-300">
-                    {formatFecha(r.fechaVencimiento)} {r.vencida ? `(Mora)` : ""}
-                  </td>
-                  <td className="py-2 px-2 text-right font-black border-x border-gray-300 text-sm">
-                    {formatMoneda(r.totalPagar, moneda)}
-                  </td>
-                  <td className="py-2 px-2 border-x border-gray-300">
-                    <div className="w-full h-6 border-b border-dashed border-gray-400"></div>
-                  </td>
+                  <td className="py-2 px-2 text-right font-black border-x border-gray-300 text-sm">{formatMoneda(r.totalPagar, moneda)}</td>
+                  <td className="py-2 px-2 border-x border-gray-300"><div className="w-full h-6 border-b border-dashed border-gray-400"></div></td>
                 </tr>
               ))}
             </tbody>
           </table>
-
-          <div className="mt-6 flex justify-between text-xs text-gray-600">
-            <p>Total de visitas agendadas: <strong>{rutaFiltrada.length}</strong></p>
-            <p>Proyectado a cobrar hoy: <strong>{formatMoneda(rutaFiltrada.reduce((acc, curr) => acc + curr.totalPagar, 0), moneda)}</strong></p>
-          </div>
         </div>
       )}
     </>
@@ -626,18 +497,10 @@ export default function Dashboard() {
 }
 
 function KpiCard({ icon: Icon, label, valor, color }: { icon: any; label: string; valor: React.ReactNode; color: string }) {
-  const styles: Record<string, string> = {
-    emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
-    blue: "bg-blue-50 text-blue-600 border-blue-100",
-    amber: "bg-amber-50 text-amber-600 border-amber-100",
-    purple: "bg-purple-50 text-purple-600 border-purple-100",
-  };
-
+  const styles: Record<string, string> = { emerald: "bg-emerald-50 text-emerald-600 border-emerald-100", blue: "bg-blue-50 text-blue-600 border-blue-100", amber: "bg-amber-50 text-amber-600 border-amber-100", purple: "bg-purple-50 text-purple-600 border-purple-100" };
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className={cn("mb-3 flex h-10 w-10 items-center justify-center rounded-xl border", styles[color])}>
-        <Icon size={20} />
-      </div>
+      <div className={cn("mb-3 flex h-10 w-10 items-center justify-center rounded-xl border", styles[color])}><Icon size={20} /></div>
       <p className="tnum font-display text-2xl font-black text-slate-900">{valor}</p>
       <p className="text-xs font-medium text-slate-500 mt-0.5">{label}</p>
     </div>

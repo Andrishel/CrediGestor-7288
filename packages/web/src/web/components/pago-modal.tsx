@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { Banknote, Smartphone, Copy, UploadCloud, Check, Search, CreditCard } from "lucide-react";
+import { Banknote, Smartphone, UploadCloud, Check, Search, CreditCard, ShieldCheck } from "lucide-react";
 import { Modal, Button, Field, inputClass, Spinner } from "./ui/primitives";
 import { useToast } from "./ui/toast";
 import { useCuotasPorCobrar, useRegistrarPago } from "../queries/pagos";
-import { useConfigCobro, useConfigGeneral } from "../queries/config";
+import { useConfigGeneral } from "../queries/config";
 import { usePrestamos } from "../queries/prestamos";
 import { uploadFile } from "../lib/upload";
-import { formatMoneda, formatFecha, cn, copiar } from "../lib/utils";
+import { formatMoneda, formatFecha, cn } from "../lib/utils";
 
 type Metodo = "EFECTIVO" | "YAPE" | "PLIN" | "TRANSFERENCIA";
 
@@ -72,7 +72,7 @@ function SelectorPrestamo({ onPick }: { onPick: (id: string) => void }) {
             <button
               key={p.id}
               onClick={() => onPick(p.id)}
-              className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-left hover:border-emerald-500 transition shadow-sm"
+              className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-left hover:border-emerald-500 transition shadow-sm cursor-pointer"
             >
               <div>
                 <p className="text-sm font-bold text-slate-900">{p.clienteNombre}</p>
@@ -100,7 +100,6 @@ function PagoFlow({
 }) {
   const showToast = useToast();
   const cuotas = useCuotasPorCobrar(prestamoId);
-  const cobro = useConfigCobro();
   const general = useConfigGeneral();
   const registrar = useRegistrarPago();
   const moneda = general.data?.moneda ?? "S/";
@@ -114,6 +113,9 @@ function PagoFlow({
   const [voucherPreview, setVoucherPreview] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [progreso, setProgreso] = useState(0);
+
+  // Ruta del QR local almacenado en public/ (usa el mismo para Yape/Plin como solicitaste)
+  const qrLocalPath = "/qr-yape.png"; 
 
   const lista = cuotas.data ?? [];
   const total = useMemo(
@@ -154,7 +156,7 @@ function PagoFlow({
       const res = await registrar.mutateAsync({
         prestamoId,
         cuotaIds: seleccion,
-        metodoPago: metodo,
+        metodoPago: metodo as any,
         montoRecibido: metodo === "EFECTIVO" ? Number(montoRecibido) : undefined,
         numeroOperacion: numeroOperacion.trim() || null,
         urlVoucher: voucherKey,
@@ -171,10 +173,6 @@ function PagoFlow({
     }
   };
 
-  const numeroCobro = metodo === "YAPE" ? cobro.data?.numeroYape : cobro.data?.numeroPlin;
-  const qrCobro = metodo === "YAPE" ? cobro.data?.urlQrYape : cobro.data?.urlQrPlin;
-  const titularCobro = metodo === "YAPE" ? cobro.data?.nombresTitularYape : cobro.data?.nombresTitularPlin;
-
   if (cuotas.isLoading) return <div className="flex justify-center py-8 text-emerald-600"><Spinner size={26} /></div>;
 
   if (lista.length === 0)
@@ -182,6 +180,7 @@ function PagoFlow({
 
   return (
     <div className="space-y-5">
+      {/* Lista de Cuotas */}
       <div>
         <p className="mb-2 text-sm font-bold text-slate-900">Cuotas a cobrar</p>
         <div className="max-h-52 space-y-2 overflow-y-auto">
@@ -192,7 +191,7 @@ function PagoFlow({
                 key={c.id}
                 onClick={() => toggle(c.id)}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-2xl border p-3.5 text-left transition shadow-sm",
+                  "flex w-full items-center gap-3 rounded-2xl border p-3.5 text-left transition shadow-sm cursor-pointer",
                   sel ? "border-emerald-500 bg-emerald-50/50" : "border-slate-200 bg-white hover:bg-slate-50",
                 )}
               >
@@ -222,11 +221,13 @@ function PagoFlow({
         </div>
       </div>
 
+      {/* Header Resumen de Cobro */}
       <div className="flex items-center justify-between rounded-2xl bg-slate-900 px-5 py-3.5 text-white shadow-lg">
         <span className="text-xs font-medium text-slate-400">Monto total a cobrar</span>
         <span className="tnum font-display text-2xl font-black text-emerald-400">{formatMoneda(totalRound, moneda)}</span>
       </div>
 
+      {/* Selector de Método de Pago */}
       <div>
         <p className="mb-2 text-sm font-bold text-slate-900">Método de pago</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -237,7 +238,7 @@ function PagoFlow({
                 key={m}
                 onClick={() => setMetodo(m)}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-2xl border py-3 text-xs font-bold transition",
+                  "flex flex-col items-center gap-1 rounded-2xl border py-3 text-xs font-bold transition cursor-pointer",
                   metodo === m ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-md" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                 )}
               >
@@ -249,6 +250,7 @@ function PagoFlow({
         </div>
       </div>
 
+      {/* Campos para EFECTIVO */}
       {metodo === "EFECTIVO" && (
         <div className="space-y-3">
           <Field label="Monto recibido en efectivo">
@@ -270,33 +272,44 @@ function PagoFlow({
         </div>
       )}
 
-      {(metodo === "YAPE" || metodo === "PLIN" || metodo === "TRANSFERENCIA") && (
-        <div className="space-y-3">
-          {qrCobro && (metodo === "YAPE" || metodo === "PLIN") ? (
-            <div className="text-center p-3 bg-slate-50 rounded-2xl border border-slate-200">
-              <img src={qrCobro} alt="QR Billetera" className="mx-auto h-40 w-44 object-contain rounded-xl" />
-              {titularCobro && <p className="text-xs font-bold text-slate-800 mt-2">{titularCobro}</p>}
-            </div>
-          ) : null}
-
-          {numeroCobro && (
-            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3">
-              <div>
-                <p className="text-xs font-bold text-slate-900">{numeroCobro}</p>
-                {titularCobro && <p className="text-[10px] text-slate-500">{titularCobro}</p>}
-              </div>
-              <Button
-                variant="outline"
-                className="py-1.5 px-3 text-xs"
-                onClick={async () => {
-                  if (await copiar(numeroCobro)) showToast("Número copiado", "success");
+      {/* Módulo de QR Local para YAPE / PLIN */}
+      {(metodo === "YAPE" || metodo === "PLIN") && (
+        <div className="space-y-3 animate-fade-in">
+          <div className="text-center p-4 bg-slate-50 rounded-2xl border border-slate-200 shadow-inner">
+            <p className="text-xs font-bold text-slate-800 mb-2 flex items-center justify-center gap-1.5">
+              <ShieldCheck size={16} className="text-emerald-600" />
+              Escanea para pagar vía {metodo}
+            </p>
+            <div className="p-2 bg-white rounded-2xl inline-block border border-slate-100 shadow-sm">
+              <img 
+                src={qrLocalPath} 
+                alt={`QR ${metodo}`} 
+                className="mx-auto h-44 w-44 object-contain rounded-xl"
+                onError={(e) => {
+                  // Fallback visual por si no encuentra la extensión exacta
+                  (e.target as HTMLElement).style.display = 'none';
                 }}
-              >
-                <Copy size={14} /> Copiar
-              </Button>
+              />
             </div>
-          )}
+            <p className="text-[11px] text-slate-500 mt-2 font-medium">
+              Verifica la notificación en tu aplicación antes de confirmar.
+            </p>
+          </div>
 
+          <Field label="N° de Operación / Referencia (Opcional)">
+            <input
+              className={inputClass}
+              value={numeroOperacion}
+              onChange={(e) => setNumeroOperacion(e.target.value)}
+              placeholder="Ej. Op. 048291"
+            />
+          </Field>
+        </div>
+      )}
+
+      {/* Módulo para TRANSFERENCIA */}
+      {metodo === "TRANSFERENCIA" && (
+        <div className="space-y-3">
           <Field label="N° de Operación / Referencia (Opcional)">
             <input
               className={inputClass}
@@ -307,7 +320,7 @@ function PagoFlow({
           </Field>
 
           <div>
-            <p className="mb-1.5 text-xs font-bold text-slate-700">Comprobante de Captura (Opcional)</p>
+            <p className="mb-1.5 text-xs font-bold text-slate-700">Comprobante / Voucher (Opcional)</p>
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center hover:bg-slate-100 transition">
               {voucherPreview ? (
                 <img src={voucherPreview} alt="voucher" className="h-24 rounded-lg object-contain" />
@@ -328,9 +341,10 @@ function PagoFlow({
         </div>
       )}
 
+      {/* Botón Principal de Confirmación */}
       <Button
         variant="success"
-        className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md"
+        className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md cursor-pointer"
         loading={registrar.isPending}
         disabled={seleccion.length === 0 || !metodo || subiendo}
         onClick={confirmar}

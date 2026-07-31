@@ -3,6 +3,7 @@ import { Link, useRoute } from "wouter";
 import { Printer, HandCoins, User, Receipt, Banknote, Smartphone, Share2, FileText, X } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner, Field, inputClass } from "../components/ui/primitives";
+import { ConfirmModal } from "../components/confirm-modal";
 import { formatMoneda, formatFecha, formatFechaCompleta, cn } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 
@@ -64,13 +65,14 @@ export default function PrestamoDetallePage() {
   const [registrandoPago, setRegistrandoPago] = useState(false);
   const [pagoBoleta, setPagoBoleta] = useState<Pago | null>(null);
 
-  // Estados Modal Pago Parcial
+  const [metodo, setMetodo] = useState<string>("EFECTIVO");
+  const [modalCobroNormal, setModalCobroNormal] = useState(false);
   const [modalParcial, setModalParcial] = useState(false);
   const [montoAbono, setMontoAbono] = useState("");
 
-  // Estados para Modal Liquidación Adelantada
   const [modalLiquidacion, setModalLiquidacion] = useState(false);
   const [conDescuento, setConDescuento] = useState(false);
+  const [showConfirmLiquidacion, setShowConfirmLiquidacion] = useState(false);
 
   const moneda = "S/";
 
@@ -164,12 +166,10 @@ export default function PrestamoDetallePage() {
     cargarDetalle();
   }, [id]);
 
-  // Variables para cálculos rápidos
   const p = prestamo!;
   const cuotaPendiente = cuotas.find((c) => c.estado !== "pagado");
   const cuotasPendientesList = cuotas.filter((c) => c.estado !== "pagado");
   
-  // Cálculo en vivo para Modal de Liquidación
   let montoCobroLiquidacion = p?.saldoPendiente || 0;
   let interesPorCuota = 0;
   let descuentoIntereses = 0;
@@ -184,78 +184,79 @@ export default function PrestamoDetallePage() {
   }
 
   const registrarPago = async (montoPagoExacto: number) => {
-    if (!prestamo || !cuotaPendiente) return;
+    if (!prestamo || cuotasPendientesList.length === 0) return;
     if (montoPagoExacto <= 0) return;
-
-    const nuevoSaldoPrestamo = Math.max(0, prestamo.saldoPendiente - montoPagoExacto);
-    const estaCompletado = nuevoSaldoPrestamo === 0;
-
-    const nuevoMontoAbonado = cuotaPendiente.montoAbonado + montoPagoExacto;
-    const nuevoSaldoCuota = Math.max(0, cuotaPendiente.saldoCuota - montoPagoExacto);
-    
-    // Si la cuota ya se pagó en su totalidad pero sobró dinero, lo dejamos en "PAGADO" (en Fase 3 se puede distribuir, pero ahora marcamos esta).
-    const estadoCuota = nuevoSaldoCuota === 0 ? "PAGADO" : "PARCIAL";
 
     setRegistrandoPago(true);
     try {
       const { error: pErr } = await supabase.from("pagos").insert([{
         prestamo_id: prestamo.id,
-        cuota_id: cuotaPendiente.id,
         monto_pagado: montoPagoExacto,
-        metodo_pago: "EFECTIVO",
+        metodo_pago: metodo,
         fecha_pago: new Date().toISOString(),
       }]);
       if (pErr) throw pErr;
 
-      const { error: cErr } = await supabase
-        .from("cuotas")
-        .update({ 
-          estado: estadoCuota,
-          monto_abonado: nuevoMontoAbonado,
-          saldo_cuota: nuevoSaldoCuota
-        })
-        .eq("id", cuotaPendiente.id);
-      if (cErr) throw cErr;
+      let dineroRestante = montoPagoExacto;
+      const promesasActualizacion = [];
 
-      const { error: prErr } = await supabase
-        .from("prestamos")
-        .update({
-          saldo_pendiente: nuevoSaldoPrestamo,
-          estado: estaCompletado ? "CANCELADO" : "ACTIVO",
-        })
-        .eq("id", prestamo.id);
+      for (const cuota of cuotasPendientesList) {
+        if (dineroRestante <= 0) break;
+
+        const aCobrarDeEsta = Math.min(cuota.saldoCuota, dineroRestante);
+        dineroRestante -= aCobrarDeEsta;
+
+        const nuevoAbonado = cuota.montoAbonado + aCobrarDeEsta;
+        const nuevoSaldo = cuota.saldoCuota - aCobrarDeEsta;
+        const nuevoEstado = nuevoSaldo <= 0 ? "PAGADO" : "PARCIAL";
+
+        promesasActualizacion.push(
+          supabase.from("cuotas").update({ 
+            estado: nuevoEstado,
+            monto_abonado: nuevoAbonado,
+            saldo_cuota: nuevoSaldo
+          }).eq("id", cuota.id)
+        );
+      }
+
+      await Promise.all(promesasActualizacion);
+
+      const nuevoSaldoPrestamo = Math.max(0, prestamo.saldoPendiente - montoPagoExacto);
+      const estaCompletado = nuevoSaldoPrestamo <= 0;
+
+      const { error: prErr } = await supabase.from("prestamos").update({
+        saldo_pendiente: nuevoSaldoPrestamo,
+        estado: estaCompletado ? "CANCELADO" : "ACTIVO",
+      }).eq("id", prestamo.id);
       if (prErr) throw prErr;
 
+      setModalCobroNormal(false);
       setModalParcial(false);
       setMontoAbono("");
       await cargarDetalle();
     } catch (err: any) {
-      alert("Error al registrar el pago: " + err.message);
+      console.error("Error al registrar el pago:", err.message);
     } finally {
       setRegistrandoPago(false);
     }
   };
 
-  const liquidarPrestamo = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const liquidarPrestamo = async () => {
     if (!prestamo) return;
 
     setRegistrandoPago(true);
     try {
-      // 1. Insertamos un pago global
       const { error: pErr } = await supabase.from("pagos").insert([{
         prestamo_id: prestamo.id,
         monto_pagado: montoCobroLiquidacion,
-        metodo_pago: "EFECTIVO",
+        metodo_pago: metodo,
         fecha_pago: new Date().toISOString(),
       }]);
       if (pErr) throw pErr;
 
-      // 2. Actualizamos cuotas para que la sumatoria refleje el nuevo total
       const idsPendientes = cuotasPendientesList.map(c => c.id);
       if (idsPendientes.length > 0) {
         if (conDescuento) {
-          // Bajamos el monto de la cuota para que el Total a Pagar baje en pantalla
           for (const c of cuotasPendientesList) {
             const nuevoMontoCuota = Math.max(0, c.montoCuota - interesPorCuota);
             await supabase.from("cuotas").update({ 
@@ -270,21 +271,47 @@ export default function PrestamoDetallePage() {
         }
       }
 
-      // 3. Cancelamos el préstamo
       await supabase.from("prestamos").update({
         saldo_pendiente: 0,
         estado: "CANCELADO",
       }).eq("id", prestamo.id);
 
+      setShowConfirmLiquidacion(false);
       setModalLiquidacion(false);
       await cargarDetalle();
-      alert("¡Préstamo liquidado exitosamente!");
     } catch (err: any) {
-      alert("Error al liquidar: " + err.message);
+      console.error("Error al liquidar:", err.message);
     } finally {
       setRegistrandoPago(false);
     }
   };
+
+  const SelectorMetodo = () => (
+    <div className="space-y-3 pt-2">
+      <p className="text-xs font-bold text-slate-700 mb-1">Método de cobro</p>
+      <div className="grid grid-cols-3 gap-2">
+        {["EFECTIVO", "YAPE", "PLIN"].map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMetodo(m)}
+            className={cn(
+              "rounded-xl border py-2 text-xs font-bold transition cursor-pointer",
+              metodo === m ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-sm" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+            )}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      {(metodo === "YAPE" || metodo === "PLIN") && (
+        <div className="animate-fade-in rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center mt-2 shadow-inner">
+          <img src="/qr-yape.jpeg" alt="QR Local" className="mx-auto h-32 w-32 object-contain rounded-xl" />
+          <p className="mt-2 text-[10px] font-medium text-slate-500">Verifica la notificación antes de cobrar.</p>
+        </div>
+      )}
+    </div>
+  );
 
   if (loading || !prestamo) {
     return (
@@ -309,7 +336,7 @@ export default function PrestamoDetallePage() {
           subtitle={cliente?.nombreCompleto}
           back="/prestamos"
           right={
-            <button onClick={() => window.print()} className="rounded-lg p-2 text-slate-300 hover:bg-slate-800 hover:text-white transition" aria-label="Imprimir">
+            <button onClick={() => window.print()} className="rounded-lg p-2 text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer" aria-label="Imprimir">
               <Printer size={18} />
             </button>
           }
@@ -354,18 +381,17 @@ export default function PrestamoDetallePage() {
           </div>
         )}
 
-        {/* Botones de Acción Modificados */}
         {!cancelado && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Button variant="success" className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-sm" loading={registrandoPago} onClick={() => registrarPago(cuotaPendiente?.saldoCuota || 0)}>
+            <Button variant="success" className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-sm cursor-pointer" onClick={() => { setMetodo("EFECTIVO"); setModalCobroNormal(true); }}>
               <HandCoins size={18} /> Cobrar Cuota ({formatMoneda(cuotaPendiente?.saldoCuota || 0, moneda)})
             </Button>
 
-            <Button variant="outline" className="w-full py-3.5 border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50" onClick={() => setModalParcial(true)}>
+            <Button variant="outline" className="w-full py-3.5 border-emerald-300 text-emerald-700 font-bold hover:bg-emerald-50 cursor-pointer" onClick={() => { setMetodo("EFECTIVO"); setMontoAbono(""); setModalParcial(true); }}>
               Abono Parcial
             </Button>
 
-            <Button variant="outline" className="w-full py-3.5 border-slate-300 text-slate-700 font-bold hover:bg-slate-50" onClick={() => setModalLiquidacion(true)}>
+            <Button variant="outline" className="w-full py-3.5 border-slate-300 text-slate-700 font-bold hover:bg-slate-50 cursor-pointer" onClick={() => { setMetodo("EFECTIVO"); setConDescuento(false); setModalLiquidacion(true); }}>
               <FileText size={18} /> Liquidar Todo
             </Button>
           </div>
@@ -424,25 +450,25 @@ export default function PrestamoDetallePage() {
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-900">{formatMoneda(pg.montoPagado, moneda)}</p>
                         <p className="truncate text-xs text-slate-500">
-                          {formatFechaCompleta(pg.fechaPago)} · {pg.metodoPago}
+                          {formatFechaCompleta(pg.fechaPago)} · <span className="font-bold text-slate-700">{pg.metodoPago}</span>
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <Badge color="success">Pagado</Badge>
-                      <button onClick={() => setPagoBoleta(pg)} className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 hover:bg-slate-100 transition">
+                      <button onClick={() => setPagoBoleta(pg)} className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 hover:bg-slate-100 transition cursor-pointer">
                         <FileText size={16} />
                       </button>
                       <button
                         onClick={() => {
                           const msg = encodeURIComponent(
-                            `*CrediGestor - Recibo de Pago*\n\nHola ${cliente?.nombreCompleto || "Cliente"},\nRegistramos tu abono de *${formatMoneda(pg.montoPagado, moneda)}* para el préstamo *${p.codigoPrestamo}*.\nSaldo pendiente actual: *${formatMoneda(p.saldoPendiente, moneda)}*.\n\n¡Gracias por tu responsabilidad!`
+                            `*CrediGestor - Recibo de Pago*\n\nHola ${cliente?.nombreCompleto || "Cliente"},\nRegistramos tu abono de *${formatMoneda(pg.montoPagado, moneda)}* vía *${pg.metodoPago}* para el préstamo *${p.codigoPrestamo}*.\nSaldo pendiente actual: *${formatMoneda(p.saldoPendiente, moneda)}*.\n\n¡Gracias por tu responsabilidad!`
                           );
                           const cleanPrefijo = (cliente?.prefijoTelefono || "51").replace("+", "");
                           window.open(`https://wa.me/${cleanPrefijo}${cliente?.telefono}?text=${msg}`, "_blank");
                         }}
-                        className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition"
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition cursor-pointer"
                       >
                         <Share2 size={16} />
                       </button>
@@ -455,25 +481,52 @@ export default function PrestamoDetallePage() {
         </div>
       </div>
 
-      {/* MODAL PAGO PARCIAL */}
+      {modalCobroNormal && cuotaPendiente && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-display text-lg font-bold text-slate-900">Cobrar Cuota</h3>
+              <button onClick={() => setModalCobroNormal(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between rounded-2xl bg-slate-900 px-5 py-3.5 text-white shadow-md">
+              <span className="text-xs font-medium text-slate-400">Total de Cuota</span>
+              <span className="tnum font-display text-2xl font-black text-emerald-400">{formatMoneda(cuotaPendiente.saldoCuota, moneda)}</span>
+            </div>
+
+            <SelectorMetodo />
+
+            <div className="grid grid-cols-2 gap-3 pt-3">
+              <Button variant="outline" className="py-3.5 cursor-pointer" onClick={() => setModalCobroNormal(false)}>Cancelar</Button>
+              <Button loading={registrandoPago} onClick={() => registrarPago(cuotaPendiente.saldoCuota)} className="py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer">
+                Confirmar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalParcial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-display text-lg font-bold text-slate-900">Abono Parcial</h3>
-              <button onClick={() => setModalParcial(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition">
+              <button onClick={() => setModalParcial(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
                 <X size={20} />
               </button>
             </div>
-            <p className="text-sm text-slate-600">
-              Ingresa el monto incompleto que el cliente va a pagar hoy. El saldo restará de la cuota actual.
-            </p>
+            
             <Field label={`Monto a cobrar (${moneda})`}>
               <input className={inputClass} autoFocus type="number" inputMode="decimal" value={montoAbono} onChange={(e) => setMontoAbono(e.target.value)} placeholder="0.00" />
             </Field>
-            <div className="grid grid-cols-2 gap-3 pt-3">
-              <Button variant="outline" className="py-3" onClick={() => setModalParcial(false)}>Cancelar</Button>
-              <Button loading={registrandoPago} disabled={!montoAbono || Number(montoAbono) <= 0} onClick={() => registrarPago(Number(montoAbono))} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold">
+
+            <SelectorMetodo />
+
+            <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100">
+              <Button variant="outline" className="py-3 cursor-pointer" onClick={() => setModalParcial(false)}>Cancelar</Button>
+              <Button loading={registrandoPago} disabled={!montoAbono || Number(montoAbono) <= 0} onClick={() => registrarPago(Number(montoAbono))} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer">
                 Cobrar
               </Button>
             </div>
@@ -481,49 +534,42 @@ export default function PrestamoDetallePage() {
         </div>
       )}
 
-      {/* MODAL DE LIQUIDACIÓN ADELANTADA */}
       {modalLiquidacion && !cancelado && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-display text-lg font-bold text-slate-900">Liquidar Préstamo</h3>
-              <button onClick={() => setModalLiquidacion(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition">
+              <button onClick={() => setModalLiquidacion(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
                 <X size={20} />
               </button>
             </div>
-
-            <p className="text-sm text-slate-600">
-              Saldo capital restante con intereses proyectados: <strong className="text-slate-900">{formatMoneda(p.saldoPendiente, moneda)}</strong>.
-            </p>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="radio" name="descuento" checked={!conDescuento} onChange={() => setConDescuento(false)} className="mt-1" />
                 <div>
                   <p className="text-sm font-bold text-slate-900">Cobro Íntegro ({formatMoneda(p.saldoPendiente, moneda)})</p>
-                  <p className="text-xs text-slate-500">Paga el saldo completo.</p>
                 </div>
               </label>
-
               <div className="border-t border-slate-200"></div>
-
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="radio" name="descuento" checked={conDescuento} onChange={() => setConDescuento(true)} className="mt-1" />
                 <div>
                   <p className="text-sm font-bold text-emerald-600">Con Descuento ({formatMoneda(Math.max(0, p.saldoPendiente - Math.floor(descuentoIntereses)), moneda)})</p>
-                  <p className="text-xs text-slate-500">Se exonera el interés de cuotas restantes.</p>
                 </div>
               </label>
             </div>
 
             <div className="text-center bg-slate-900 rounded-xl p-3 text-white">
-              <p className="text-xs text-slate-400">El cliente pagará ahora:</p>
+              <p className="text-xs text-slate-400">Total a liquidar:</p>
               <p className="font-display font-black text-2xl text-emerald-400">{formatMoneda(montoCobroLiquidacion, moneda)}</p>
             </div>
 
+            <SelectorMetodo />
+
             <div className="grid grid-cols-2 gap-3 pt-3">
-              <Button variant="outline" className="py-3" onClick={() => setModalLiquidacion(false)}>Cancelar</Button>
-              <Button loading={registrandoPago} onClick={liquidarPrestamo} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold">
+              <Button variant="outline" className="py-3 cursor-pointer" onClick={() => setModalLiquidacion(false)}>Cancelar</Button>
+              <Button onClick={() => setShowConfirmLiquidacion(true)} className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer">
                 Liquidar
               </Button>
             </div>
@@ -531,13 +577,12 @@ export default function PrestamoDetallePage() {
         </div>
       )}
 
-      {/* Modal Boleta para PDF / Impresión */}
       {pagoBoleta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <span className="font-display text-sm font-bold text-slate-900">Comprobante de Pago</span>
-              <button onClick={() => setPagoBoleta(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setPagoBoleta(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -551,9 +596,8 @@ export default function PrestamoDetallePage() {
               <div className="space-y-1.5 text-left text-slate-700">
                 <p className="flex justify-between"><span>Código:</span> <strong>{p.codigoPrestamo}</strong></p>
                 <p className="flex justify-between"><span>Cliente:</span> <strong className="truncate max-w-[150px]">{cliente?.nombreCompleto}</strong></p>
-                <p className="flex justify-between"><span>{cliente?.dni?.length && cliente.dni.length > 8 ? 'Doc:' : 'DNI:'}</span> <strong>{cliente?.dni || "—"}</strong></p>
                 <p className="flex justify-between"><span>Fecha:</span> <strong>{formatFechaCompleta(pagoBoleta.fechaPago)}</strong></p>
-                <p className="flex justify-between"><span>Método:</span> <strong>{pagoBoleta.metodoPago}</strong></p>
+                <p className="flex justify-between"><span>Método:</span> <strong className="uppercase font-black">{pagoBoleta.metodoPago}</strong></p>
               </div>
 
               <div className="border-t border-b border-dashed border-slate-300 py-3 my-2">
@@ -569,14 +613,25 @@ export default function PrestamoDetallePage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => setPagoBoleta(null)}>Cerrar</Button>
-              <Button className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" onClick={() => window.print()}>
-                <Printer size={15} /> Imprimir / PDF
+              <Button variant="outline" className="cursor-pointer" onClick={() => setPagoBoleta(null)}>Cerrar</Button>
+              <Button className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer" onClick={() => window.print()}>
+                <Printer size={15} /> Imprimir
               </Button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={showConfirmLiquidacion}
+        title="¿Liquidar Préstamo?"
+        message={`Esta acción cancelará la totalidad del crédito por un monto de ${formatMoneda(montoCobroLiquidacion, moneda)}.`}
+        confirmText="Sí, Liquidar Todo"
+        cancelText="Volver"
+        variant="warning"
+        onConfirm={liquidarPrestamo}
+        onCancel={() => setShowConfirmLiquidacion(false)}
+      />
     </AppShell>
   );
 }

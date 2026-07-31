@@ -36,8 +36,8 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
       <header className="sticky top-0 z-40 w-full bg-slate-900 text-white shadow-lg print:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
           <Link to="/" className="flex items-center gap-3 cursor-pointer">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 shadow-md overflow-hidden p-1">
-              <img src="/icono.jpg" alt="CrediGestor Logo" className="h-full w-full object-contain" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 font-display text-xl font-black text-slate-950 shadow-md">
+              C
             </div>
             <div>
               <h1 className="font-display text-xl font-bold tracking-tight text-white">CrediGestor</h1>

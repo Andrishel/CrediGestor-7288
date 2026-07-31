@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings, Wallet, UploadCloud, QrCode } from "lucide-react";
+import { Settings, Wallet, CheckCircle2 } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Field, inputClass, Spinner } from "../components/ui/primitives";
 import { useToast } from "../components/ui/toast";
@@ -11,13 +11,14 @@ type Metodo = "EFECTIVO" | "YAPE" | "PLIN";
 
 export default function ConfigPage() {
   const [tab, setTab] = useState<Tab>("general");
+
   return (
     <AppShell header={<PageHeader title="Configuración" subtitle="Ajusta las reglas del negocio" />}>
-      <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-white p-1">
+      <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-white p-1 border border-slate-200 shadow-sm">
         {(
           [
             { id: "general", label: "General", icon: Settings },
-            { id: "cobro", label: "Cobro", icon: Wallet },
+            { id: "cobro", label: "Cobro / QR", icon: Wallet },
           ] as const
         ).map((t) => {
           const Icon = t.icon;
@@ -26,8 +27,8 @@ export default function ConfigPage() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(
-                "flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition",
-                tab === t.id ? "bg-brand text-white" : "text-ink-soft",
+                "flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition cursor-pointer",
+                tab === t.id ? "bg-emerald-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-50",
               )}
             >
               <Icon size={16} /> {t.label}
@@ -54,8 +55,7 @@ const defaultConfigGeneral = {
   plazoMaximoCuotas: 30,
   frecuenciasPermitidas: ["diario", "semanal", "mensual"] as Frec[],
   metodosPagoActivos: ["EFECTIVO", "YAPE", "PLIN"] as Metodo[],
-  diasRecordatorioVencimiento: 1,
-  scoreMinimoAprobacion: 50,
+  mensajeTicket: "¡Gracias por mantener al día su crédito!",
 };
 
 function GeneralForm() {
@@ -76,7 +76,7 @@ function GeneralForm() {
     }
   }, []);
 
-  if (!f) return <div className="flex justify-center py-16 text-brand"><Spinner size={26} /></div>;
+  if (!f) return <div className="flex justify-center py-16 text-emerald-600"><Spinner size={26} /></div>;
 
   const set = (k: string, v: unknown) => setF((s) => ({ ...(s as object), [k]: v }));
   const num = (k: string) => Number((f as Record<string, unknown>)[k]) || 0;
@@ -107,17 +107,20 @@ function GeneralForm() {
   };
 
   return (
-    <div className="space-y-4">
-      <Section titulo="Empresa">
+    <div className="space-y-4 max-w-2xl mx-auto pb-10">
+      <Section titulo="Datos del Negocio">
         <Field label="Nombre de la empresa">
           <input className={inputClass} value={str("nombreEmpresa")} onChange={(e) => set("nombreEmpresa", e.target.value)} />
         </Field>
         <Field label="Moneda" hint="Símbolo mostrado en toda la app (ej. S/, $, Bs)">
           <input className={inputClass} value={str("moneda")} onChange={(e) => set("moneda", e.target.value)} />
         </Field>
+        <Field label="Mensaje al pie del comprobante">
+          <input className={inputClass} value={str("mensajeTicket")} onChange={(e) => set("mensajeTicket", e.target.value)} placeholder="Ej. ¡Gracias por su puntualidad!" />
+        </Field>
       </Section>
 
-      <Section titulo="Tasas y mora">
+      <Section titulo="Tasas y Mora">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Interés por defecto (%)">
             <input className={inputClass} type="number" inputMode="decimal" value={str("tasaInteresDefault")} onChange={(e) => set("tasaInteresDefault", e.target.value)} />
@@ -128,30 +131,24 @@ function GeneralForm() {
           <Field label="Días de gracia">
             <input className={inputClass} type="number" inputMode="numeric" value={str("diasGraciaMora")} onChange={(e) => set("diasGraciaMora", e.target.value)} />
           </Field>
-          <Field label="Recordatorio (días antes)">
-            <input className={inputClass} type="number" inputMode="numeric" value={str("diasRecordatorioVencimiento")} onChange={(e) => set("diasRecordatorioVencimiento", e.target.value)} />
-          </Field>
         </div>
       </Section>
 
-      <Section titulo="Límites de préstamos">
+      <Section titulo="Límites de Préstamos">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Monto mínimo">
+          <Field label="Monto mínimo (S/)">
             <input className={inputClass} type="number" inputMode="decimal" value={str("montoMinimoPrestamo")} onChange={(e) => set("montoMinimoPrestamo", e.target.value)} />
           </Field>
-          <Field label="Monto máximo">
+          <Field label="Monto máximo (S/)">
             <input className={inputClass} type="number" inputMode="decimal" value={str("montoMaximoPrestamo")} onChange={(e) => set("montoMaximoPrestamo", e.target.value)} />
           </Field>
           <Field label="Plazo máximo (cuotas)">
             <input className={inputClass} type="number" inputMode="numeric" value={str("plazoMaximoCuotas")} onChange={(e) => set("plazoMaximoCuotas", e.target.value)} />
           </Field>
-          <Field label="Score mínimo aprobación">
-            <input className={inputClass} type="number" inputMode="numeric" value={str("scoreMinimoAprobacion")} onChange={(e) => set("scoreMinimoAprobacion", e.target.value)} />
-          </Field>
         </div>
       </Section>
 
-      <Section titulo="Frecuencias permitidas">
+      <Section titulo="Frecuencias Permitidas">
         <div className="flex flex-wrap gap-2">
           {FRECS.map((fr) => (
             <Chip key={fr} activo={arr("frecuenciasPermitidas").includes(fr)} onClick={() => toggleArr("frecuenciasPermitidas", fr)}>
@@ -161,7 +158,7 @@ function GeneralForm() {
         </div>
       </Section>
 
-      <Section titulo="Métodos de pago activos">
+      <Section titulo="Métodos de Pago Activos">
         <div className="flex flex-wrap gap-2">
           {METODOS.map((m) => (
             <Chip key={m} activo={arr("metodosPagoActivos").includes(m)} onClick={() => toggleArr("metodosPagoActivos", m)}>
@@ -171,8 +168,8 @@ function GeneralForm() {
         </div>
       </Section>
 
-      <Button className="w-full py-3" loading={saving} onClick={guardar}>
-        Guardar cambios
+      <Button className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md cursor-pointer" loading={saving} onClick={guardar}>
+        Guardar Cambios
       </Button>
     </div>
   );
@@ -181,11 +178,7 @@ function GeneralForm() {
 function CobroForm() {
   const showToast = useToast();
   const [numeroYape, setNumeroYape] = useState("");
-  const [numeroPlin, setNumeroPlin] = useState("");
   const [titularYape, setTitularYape] = useState("");
-  const [titularPlin, setTitularPlin] = useState("");
-  const [previewYape, setPreviewYape] = useState<string | null>(null);
-  const [previewPlin, setPreviewPlin] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -194,41 +187,19 @@ function CobroForm() {
       try {
         const parsed = JSON.parse(saved);
         setNumeroYape(parsed.numeroYape || "");
-        setNumeroPlin(parsed.numeroPlin || "");
         setTitularYape(parsed.titularYape || "");
-        setTitularPlin(parsed.titularPlin || "");
-        setPreviewYape(parsed.previewYape || null);
-        setPreviewPlin(parsed.previewPlin || null);
       } catch {
-        // usar vacíos
+        // vacíos
       }
     }
   }, []);
-
-  const subir = (e: React.ChangeEvent<HTMLInputElement>, tipo: "yape" | "plin") => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result as string;
-      if (tipo === "yape") setPreviewYape(base64);
-      else setPreviewPlin(base64);
-      showToast("QR cargado", "success");
-    };
-    reader.readAsDataURL(file);
-  };
 
   const guardar = async () => {
     setSaving(true);
     try {
       const data = {
         numeroYape: numeroYape.trim(),
-        numeroPlin: numeroPlin.trim(),
         titularYape: titularYape.trim(),
-        titularPlin: titularPlin.trim(),
-        previewYape,
-        previewPlin,
       };
       localStorage.setItem("cg_config_cobro", JSON.stringify(data));
       showToast("Datos de cobro guardados", "success");
@@ -240,29 +211,30 @@ function CobroForm() {
   };
 
   return (
-    <div className="space-y-4">
-      <Section titulo="Yape">
-        <Field label="Número Yape">
+    <div className="space-y-4 max-w-2xl mx-auto pb-10">
+      <Section titulo="Referencia de Billetera Digital">
+        <Field label="Número Yape / Plin">
           <input className={inputClass} inputMode="numeric" maxLength={9} value={numeroYape} onChange={(e) => setNumeroYape(e.target.value.replace(/\D/g, ""))} placeholder="987654321" />
         </Field>
-        <Field label="Titular de la cuenta">
+        <Field label="Titular de la Cuenta">
           <input className={inputClass} value={titularYape} onChange={(e) => setTitularYape(e.target.value)} placeholder="Nombre del titular" />
         </Field>
-        <QrUploader label="QR de Yape" preview={previewYape} subiendo={false} onChange={(e) => subir(e, "yape")} />
       </Section>
 
-      <Section titulo="Plin">
-        <Field label="Número Plin">
-          <input className={inputClass} inputMode="numeric" maxLength={9} value={numeroPlin} onChange={(e) => setNumeroPlin(e.target.value.replace(/\D/g, ""))} placeholder="987654321" />
-        </Field>
-        <Field label="Titular de la cuenta">
-          <input className={inputClass} value={titularPlin} onChange={(e) => setTitularPlin(e.target.value)} placeholder="Nombre del titular" />
-        </Field>
-        <QrUploader label="QR de Plin" preview={previewPlin} subiendo={false} onChange={(e) => subir(e, "plin")} />
+      <Section titulo="Código QR del Sistema">
+        <div className="text-center p-4 bg-slate-50 rounded-2xl border border-slate-200">
+          <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-700 mb-3">
+            <CheckCircle2 size={16} /> QR Local Activo (/public/qr-yape.png)
+          </div>
+          <img src="/qr-yape.png" alt="QR Yape" className="mx-auto h-44 w-44 object-contain rounded-xl border border-slate-200 shadow-sm" />
+          <p className="text-[11px] text-slate-500 mt-3 font-medium">
+            Este es el código QR estático compilado en la aplicación para agilizar los cobros.
+          </p>
+        </div>
       </Section>
 
-      <Button className="w-full py-3" loading={saving} onClick={guardar}>
-        Guardar datos de cobro
+      <Button className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md cursor-pointer" loading={saving} onClick={guardar}>
+        Guardar Datos de Referencia
       </Button>
     </div>
   );
@@ -270,8 +242,8 @@ function CobroForm() {
 
 function Section({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-3 rounded-2xl border border-line bg-white p-4">
-      <p className="font-display text-sm font-semibold text-ink">{titulo}</p>
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="font-display text-sm font-bold text-slate-900">{titulo}</p>
       {children}
     </div>
   );
@@ -283,44 +255,11 @@ function Chip({ activo, onClick, children }: { activo: boolean; onClick: () => v
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-4 py-1.5 text-xs font-semibold capitalize transition",
-        activo ? "border-brand bg-brand text-white" : "border-line bg-white text-ink-soft",
+        "rounded-xl border px-4 py-2 text-xs font-bold capitalize transition cursor-pointer",
+        activo ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-sm" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
       )}
     >
       {children}
     </button>
-  );
-}
-
-function QrUploader({
-  label,
-  preview,
-  subiendo,
-  onChange,
-}: {
-  label: string;
-  preview: string | null;
-  subiendo: boolean;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <div>
-      <p className="mb-1.5 text-sm font-medium text-ink">{label}</p>
-      <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-line bg-surface px-4 py-5 text-center">
-        {preview ? (
-          <img src={preview} alt={label} className="h-32 w-32 rounded-lg object-contain" />
-        ) : (
-          <>
-            <QrCode size={26} className="text-accent" />
-            <span className="text-xs text-ink-soft">Sube la imagen del código QR</span>
-          </>
-        )}
-        <span className="flex items-center gap-1.5 text-xs font-semibold text-accent">
-          {subiendo ? <Spinner size={14} /> : <UploadCloud size={14} />}
-          {preview ? "Cambiar QR" : "Subir QR"}
-        </span>
-        <input type="file" accept="image/*" className="hidden" onChange={onChange} />
-      </label>
-    </div>
   );
 }
