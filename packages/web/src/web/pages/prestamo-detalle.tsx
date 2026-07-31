@@ -162,14 +162,40 @@ export default function PrestamoDetallePage() {
     }
   };
 
+  // Escucha en tiempo real vía WebSockets para recargar datos automáticamente
   useEffect(() => {
     cargarDetalle();
+
+    if (!id) return;
+
+    const channel = supabase
+      .channel(`realtime-prestamo-detalle-${id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pagos", filter: `prestamo_id=eq.${id}` },
+        () => cargarDetalle()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "cuotas", filter: `prestamo_id=eq.${id}` },
+        () => cargarDetalle()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "prestamos", filter: `id=eq.${id}` },
+        () => cargarDetalle()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   const p = prestamo!;
   const cuotaPendiente = cuotas.find((c) => c.estado !== "pagado");
   const cuotasPendientesList = cuotas.filter((c) => c.estado !== "pagado");
-  
+
   let montoCobroLiquidacion = p?.saldoPendiente || 0;
   let interesPorCuota = 0;
   let descuentoIntereses = 0;

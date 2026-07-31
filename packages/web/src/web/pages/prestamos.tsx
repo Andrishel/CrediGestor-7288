@@ -132,8 +132,20 @@ export default function PrestamosPage() {
     }
   };
 
+  // Escucha en tiempo real para refrescar la lista general de préstamos
   useEffect(() => {
     cargarPrestamos();
+
+    const channel = supabase
+      .channel("realtime-prestamos-lista")
+      .on("postgres_changes", { event: "*", schema: "public", table: "prestamos" }, () => cargarPrestamos())
+      .on("postgres_changes", { event: "*", schema: "public", table: "pagos" }, () => cargarPrestamos())
+      .on("postgres_changes", { event: "*", schema: "public", table: "cuotas" }, () => cargarPrestamos())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const listaFiltrada = prestamos.filter((p) => {
@@ -241,7 +253,6 @@ export default function PrestamosPage() {
                       <span className="capitalize font-semibold text-slate-700">{p.frecuencia}</span>
                       <span>{p.cuotasPagadas}/{p.cuotasTotales} cuotas</span>
                       
-                      {/* Botón Ver Estado de Cuenta */}
                       <button
                         onClick={(e) => {
                           e.preventDefault();
@@ -262,7 +273,6 @@ export default function PrestamosPage() {
         </div>
       </AppShell>
 
-      {/* MODAL Y VISOR DEL ESTADO DE CUENTA (PDF / IMPRESIÓN) */}
       {estadoCuentaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-2 sm:p-4 backdrop-blur-sm print:p-0 print:bg-white print:static">
           <div className="w-full max-w-2xl max-h-[95vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl space-y-4 print:max-w-none print:max-h-none print:shadow-none print:p-0">
@@ -277,7 +287,6 @@ export default function PrestamosPage() {
               </button>
             </div>
 
-            {/* HOJA A4 IMPRIMIBLE / ESTADO DE CUENTA */}
             <div id="estado-cuenta-print" className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 text-xs space-y-5 print:border-none print:p-0">
               
               <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
@@ -291,7 +300,6 @@ export default function PrestamosPage() {
                 </div>
               </div>
 
-              {/* Datos del Cliente y Resumen */}
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <div>
                   <p className="text-[10px] uppercase font-bold text-slate-400">Titular del Crédito</p>
@@ -306,7 +314,6 @@ export default function PrestamosPage() {
                 </div>
               </div>
 
-              {/* Tabla de Avance de Cuotas */}
               <div>
                 <p className="font-bold text-slate-900 mb-2 uppercase text-[10px] tracking-wider">Cronograma y Cumplimiento</p>
                 <table className="w-full text-left border-collapse">
@@ -335,7 +342,6 @@ export default function PrestamosPage() {
                 </table>
               </div>
 
-              {/* Historial de Pagos Recibidos */}
               {estadoCuentaModal.pagos.length > 0 && (
                 <div>
                   <p className="font-bold text-slate-900 mb-2 uppercase text-[10px] tracking-wider">Historial de Transacciones Registradas</p>
