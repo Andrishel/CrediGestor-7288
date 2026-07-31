@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
-import { Trophy, Info, Calendar, CheckCircle2, Lock, Crown, UserCheck } from "lucide-react";
+import { Trophy, Info, CheckCircle2, Crown, UserCheck } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Badge, Spinner, Button } from "../components/ui/primitives";
 import { formatMoneda, formatFecha } from "../lib/utils";
@@ -313,7 +313,7 @@ export default function PanderoDetallePage() {
 
                   <div className="flex flex-col gap-2">
                      <Button
-                      variant={pt.yaRecibioPozo ? "outline" : "default"}
+                      variant={pt.yaRecibioPozo ? "outline" : "primary"}
                       className={`text-[10px] font-bold px-3 py-1.5 h-auto ${pt.yaRecibioPozo ? "border-amber-300 text-amber-700 bg-amber-50" : ""}`}
                       onClick={() => marcarPozoEntregado(pt.id, pt.yaRecibioPozo)}
                     >
