@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { Printer, HandCoins, User, Receipt, Banknote, Smartphone, Share2, FileText, X } from "lucide-react";
+import { Printer, HandCoins, User, Receipt, Banknote, Smartphone, Share2, FileText, X, Download } from "lucide-react";
 import { AppShell, PageHeader } from "../components/layout";
 import { Button, Badge, Spinner, Field, inputClass } from "../components/ui/primitives";
 import { ConfirmModal } from "../components/confirm-modal";
-import { formatMoneda, formatFecha, formatFechaCompleta, cn } from "../lib/utils";
+import { formatMoneda, formatFecha, formatFechaCompleta, cn, abrirWhatsappCliente, compartirComprobanteImagen } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 
 type Cuota = {
@@ -162,7 +162,6 @@ export default function PrestamoDetallePage() {
     }
   };
 
-  // Escucha en tiempo real vía WebSockets para recargar datos automáticamente
   useEffect(() => {
     cargarDetalle();
 
@@ -170,21 +169,9 @@ export default function PrestamoDetallePage() {
 
     const channel = supabase
       .channel(`realtime-prestamo-detalle-${id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pagos", filter: `prestamo_id=eq.${id}` },
-        () => cargarDetalle()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "cuotas", filter: `prestamo_id=eq.${id}` },
-        () => cargarDetalle()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "prestamos", filter: `id=eq.${id}` },
-        () => cargarDetalle()
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "pagos", filter: `prestamo_id=eq.${id}` }, () => cargarDetalle())
+      .on("postgres_changes", { event: "*", schema: "public", table: "cuotas", filter: `prestamo_id=eq.${id}` }, () => cargarDetalle())
+      .on("postgres_changes", { event: "*", schema: "public", table: "prestamos", filter: `id=eq.${id}` }, () => cargarDetalle())
       .subscribe();
 
     return () => {
@@ -215,12 +202,17 @@ export default function PrestamoDetallePage() {
 
     setRegistrandoPago(true);
     try {
-      const { error: pErr } = await supabase.from("pagos").insert([{
+      const operacionId = `OP-${Math.floor(Math.random() * 10000000).toString(16).toUpperCase()}`;
+      const fechaActual = new Date().toISOString();
+
+      const { error: pErr, data: pInsertado } = await supabase.from("pagos").insert([{
         prestamo_id: prestamo.id,
         monto_pagado: montoPagoExacto,
         metodo_pago: metodo,
-        fecha_pago: new Date().toISOString(),
-      }]);
+        fecha_pago: fechaActual,
+        numero_operacion: operacionId,
+      }]).select().single();
+      
       if (pErr) throw pErr;
 
       let dineroRestante = montoPagoExacto;
@@ -259,6 +251,18 @@ export default function PrestamoDetallePage() {
       setModalCobroNormal(false);
       setModalParcial(false);
       setMontoAbono("");
+      
+      // Mostrar la boleta al terminar el cobro
+      if (pInsertado) {
+        setPagoBoleta({
+          id: pInsertado.id,
+          montoPagado: pInsertado.monto_pagado,
+          fechaPago: pInsertado.fecha_pago,
+          metodoPago: pInsertado.metodo_pago,
+          numeroOperacion: pInsertado.numero_operacion
+        });
+      }
+      
       await cargarDetalle();
     } catch (err: any) {
       console.error("Error al registrar el pago:", err.message);
@@ -272,11 +276,15 @@ export default function PrestamoDetallePage() {
 
     setRegistrandoPago(true);
     try {
+      const operacionId = `OP-${Math.floor(Math.random() * 10000000).toString(16).toUpperCase()}`;
+      const fechaActual = new Date().toISOString();
+
       const { error: pErr } = await supabase.from("pagos").insert([{
         prestamo_id: prestamo.id,
         monto_pagado: montoCobroLiquidacion,
         metodo_pago: metodo,
-        fecha_pago: new Date().toISOString(),
+        fecha_pago: fechaActual,
+        numero_operacion: operacionId,
       }]);
       if (pErr) throw pErr;
 
@@ -332,7 +340,7 @@ export default function PrestamoDetallePage() {
       </div>
       {(metodo === "YAPE" || metodo === "PLIN") && (
         <div className="animate-fade-in rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center mt-2 shadow-inner">
-          <img src="/qr-yape.jpeg" alt="QR Local" className="mx-auto h-32 w-32 object-contain rounded-xl" />
+          <img src="/qr-yape.png" alt="QR Local" className="mx-auto h-32 w-32 object-contain rounded-xl" />
           <p className="mt-2 text-[10px] font-medium text-slate-500">Verifica la notificación antes de cobrar.</p>
         </div>
       )}
@@ -488,13 +496,10 @@ export default function PrestamoDetallePage() {
                       </button>
                       <button
                         onClick={() => {
-                          const msg = encodeURIComponent(
-                            `*CrediGestor - Recibo de Pago*\n\nHola ${cliente?.nombreCompleto || "Cliente"},\nRegistramos tu abono de *${formatMoneda(pg.montoPagado, moneda)}* vía *${pg.metodoPago}* para el préstamo *${p.codigoPrestamo}*.\nSaldo pendiente actual: *${formatMoneda(p.saldoPendiente, moneda)}*.\n\n¡Gracias por tu responsabilidad!`
-                          );
-                          const cleanPrefijo = (cliente?.prefijoTelefono || "51").replace("+", "");
-                          window.open(`https://wa.me/${cleanPrefijo}${cliente?.telefono}?text=${msg}`, "_blank");
+                          const msg = `*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${cliente?.nombreCompleto || "Cliente"}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${pg.numeroOperacion || "S/N"}\n*Crédito:* ${p.codigoPrestamo}\n*Vía:* ${pg.metodoPago}\n*Abono:* ${formatMoneda(pg.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(p.saldoPendiente, moneda)}\n*Fecha:* ${formatFechaCompleta(pg.fechaPago)}\n\n¡Gracias por tu responsabilidad!`;
+                          abrirWhatsappCliente(cliente?.telefono || "", cliente?.prefijoTelefono, msg);
                         }}
-                        className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition cursor-pointer"
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-emerald-700 hover:bg-emerald-100 transition cursor-pointer"
                       >
                         <Share2 size={16} />
                       </button>
@@ -509,7 +514,7 @@ export default function PrestamoDetallePage() {
 
       {modalCobroNormal && cuotaPendiente && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-display text-lg font-bold text-slate-900">Cobrar Cuota</h3>
               <button onClick={() => setModalCobroNormal(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
@@ -536,7 +541,7 @@ export default function PrestamoDetallePage() {
 
       {modalParcial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-display text-lg font-bold text-slate-900">Abono Parcial</h3>
               <button onClick={() => setModalParcial(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
@@ -562,7 +567,7 @@ export default function PrestamoDetallePage() {
 
       {modalLiquidacion && !cancelado && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-display text-lg font-bold text-slate-900">Liquidar Préstamo</h3>
               <button onClick={() => setModalLiquidacion(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition cursor-pointer">
@@ -604,46 +609,61 @@ export default function PrestamoDetallePage() {
       )}
 
       {pagoBoleta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm print:bg-white print:p-0">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-4 print:shadow-none print:p-0">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
               <span className="font-display text-sm font-bold text-slate-900">Comprobante de Pago</span>
               <button onClick={() => setPagoBoleta(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
 
-            <div id="ticket-print" className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center text-xs space-y-3">
+            <div id="ticket-print" className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center text-xs space-y-3 print:border-none print:bg-white print:p-0">
               <div className="border-b border-slate-200 pb-2">
-                <h2 className="font-display text-lg font-black text-slate-900">CrediGestor</h2>
+                <h2 className="font-display text-lg font-black text-slate-900 tracking-widest uppercase">CrediGestor</h2>
                 <p className="text-[10px] text-slate-500 uppercase">Boleta de Cobro</p>
               </div>
 
               <div className="space-y-1.5 text-left text-slate-700">
+                <p className="flex justify-between"><span>Transacción:</span> <strong className="font-mono">{pagoBoleta.numeroOperacion || "S/N"}</strong></p>
                 <p className="flex justify-between"><span>Código:</span> <strong>{p.codigoPrestamo}</strong></p>
                 <p className="flex justify-between"><span>Cliente:</span> <strong className="truncate max-w-[150px]">{cliente?.nombreCompleto}</strong></p>
                 <p className="flex justify-between"><span>Fecha:</span> <strong>{formatFechaCompleta(pagoBoleta.fechaPago)}</strong></p>
-                <p className="flex justify-between"><span>Método:</span> <strong className="uppercase font-black">{pagoBoleta.metodoPago}</strong></p>
+                <p className="flex justify-between items-center border-t border-slate-200 mt-2 pt-2"><span>Método:</span> <strong className="uppercase font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">{pagoBoleta.metodoPago}</strong></p>
               </div>
 
-              <div className="border-t border-b border-dashed border-slate-300 py-3 my-2">
-                <p className="text-slate-500">Monto Abonado</p>
-                <p className="font-display text-2xl font-black text-emerald-600">{formatMoneda(pagoBoleta.montoPagado, moneda)}</p>
+              <div className="border-t border-b border-dashed border-slate-300 py-3 my-2 text-center">
+                <p className="text-slate-500 text-[11px] mb-1">Monto Abonado</p>
+                <p className="font-display text-3xl font-black text-emerald-600">{formatMoneda(pagoBoleta.montoPagado, moneda)}</p>
               </div>
 
               <div className="text-left text-slate-700">
                 <p className="flex justify-between"><span>Saldo Restante:</span> <strong>{formatMoneda(p.saldoPendiente, moneda)}</strong></p>
               </div>
 
-              <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-200">¡Gracias por su puntualidad!</p>
+              <div className="pt-3 text-center border-t border-slate-200 mt-3">
+                <p className="text-[10px] text-slate-400">Este documento certifica su pago.</p>
+                <p className="text-[10px] text-slate-400 font-bold mt-0.5">¡Gracias por su puntualidad!</p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" className="cursor-pointer" onClick={() => setPagoBoleta(null)}>Cerrar</Button>
-              <Button className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer" onClick={() => window.print()}>
-                <Printer size={15} /> Imprimir
+            <div className="grid grid-cols-2 gap-2 print:hidden">
+              <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold cursor-pointer" onClick={() => compartirComprobanteImagen("ticket-print")}>
+                <Download size={15} /> Compartir PDF
+              </Button>
+              <Button 
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer" 
+                onClick={() => {
+                  const msg = `*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${cliente?.nombreCompleto || "Cliente"}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${pagoBoleta.numeroOperacion || "S/N"}\n*Crédito:* ${p.codigoPrestamo}\n*Vía:* ${pagoBoleta.metodoPago}\n*Abono:* ${formatMoneda(pagoBoleta.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(p.saldoPendiente, moneda)}\n*Fecha:* ${formatFechaCompleta(pagoBoleta.fechaPago)}\n\n¡Gracias por tu responsabilidad!`;
+                  abrirWhatsappCliente(cliente?.telefono || "", cliente?.prefijoTelefono, msg);
+                }}
+              >
+                <Share2 size={15} /> Enviar
               </Button>
             </div>
+            <Button variant="outline" className="w-full mt-2 cursor-pointer print:hidden" onClick={() => setPagoBoleta(null)}>
+              Cerrar Ventana
+            </Button>
           </div>
         </div>
       )}

@@ -1,3 +1,6 @@
+import html2canvas from "html2canvas";
+import { Share } from "@capacitor/share";
+
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
@@ -92,4 +95,30 @@ export async function copiar(texto: string): Promise<boolean> {
 
 export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
+}
+
+// Abre WhatsApp directo al teléfono del cliente sin selector
+export function abrirWhatsappCliente(telefono: string, prefijo: string = "51", mensaje: string) {
+  const numLimpio = (prefijo + telefono).replace(/\D/g, "");
+  const url = `https://api.whatsapp.com/send?phone=${numLimpio}&text=${encodeURIComponent(mensaje)}`;
+  window.open(url, "_blank");
+}
+
+// Genera la boleta como Imagen/PDF Nativo y la comparte
+export async function compartirComprobanteImagen(elementId: string) {
+  const elemento = document.getElementById(elementId);
+  if (!elemento) return;
+  try {
+    const canvas = await html2canvas(elemento, { scale: 2, backgroundColor: "#ffffff" });
+    const base64Image = canvas.toDataURL("image/png");
+    await Share.share({
+      title: "Comprobante de Pago",
+      text: "Adjunto comprobante oficial de pago - CrediGestor",
+      url: base64Image,
+      dialogTitle: "Guardar o Compartir Comprobante",
+    });
+  } catch (error) {
+    console.error("Error al generar imagen", error);
+    alert("No se pudo generar la imagen del comprobante.");
+  }
 }

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Route, Switch, useLocation, useRouter } from "wouter";
 import { App as CapApp } from "@capacitor/app";
+import { StatusBar, Style } from "@capacitor/status-bar"; // <--- Importamos la StatusBar
 import { Provider } from "./components/provider";
 import { ProtectedRoute } from "./components/protected-route";
 
@@ -48,6 +49,12 @@ function useNativeBackButton() {
 function AppContent() {
   // Activamos la escucha del botón atrás nativo
   useNativeBackButton();
+
+  // Configuración de la StatusBar oscura para ocultar la franja gris
+  useEffect(() => {
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: "#0f172a" }).catch(() => {});
+  }, []);
 
   return (
     <Switch>

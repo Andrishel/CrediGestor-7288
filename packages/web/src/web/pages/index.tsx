@@ -16,16 +16,19 @@ import {
   Share2,
   CheckCircle2,
   X,
+  Download,
 } from "lucide-react";
 import { AppShell } from "../components/layout";
 import { Button, CardSkeleton, EmptyState, Badge } from "../components/ui/primitives";
-import { formatMoneda, formatFechaCompleta, formatFecha, iniciales, cn } from "../lib/utils";
+import { formatMoneda, formatFechaCompleta, formatFecha, iniciales, cn, abrirWhatsappCliente, compartirComprobanteImagen } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 
 type RutaItem = {
   cuotaId: string;
   prestamoId: string;
   clienteNombre: string;
+  clienteTelefono: string;
+  clientePrefijo: string;
   codigoPrestamo: string;
   numeroCuota: number;
   direccionPuesto?: string | null;
@@ -69,12 +72,14 @@ export default function Dashboard() {
   const [filtroZona, setFiltroZona] = useState<string>("TODAS");
   const [reciboModal, setReciboModal] = useState<{
     clienteNombre: string;
+    clienteTelefono: string;
+    clientePrefijo: string;
     montoPagado: number;
     saldoRestante: number;
     codigo: string;
     operacionId: string;
     fechaHora: string;
-    metodoPago: string; // <-- Nuevo campo para el recibo
+    metodoPago: string;
   } | null>(null);
 
   const [simMonto, setSimMonto] = useState("500");
@@ -118,7 +123,7 @@ export default function Dashboard() {
 
       const { data: cuotasData } = await supabase
         .from("cuotas")
-        .select(`id, numero_cuota, fecha_vencimiento, monto_cuota, mora_acumulada, estado, prestamos ( id, codigo_prestamo, clientes ( nombre_completo, direccion_puesto ) )`)
+        .select(`id, numero_cuota, fecha_vencimiento, monto_cuota, mora_acumulada, estado, prestamos ( id, codigo_prestamo, clientes ( nombre_completo, direccion_puesto, telefono, prefijo_telefono ) )`)
         .neq("estado", "PAGADO")
         .order("fecha_vencimiento", { ascending: true });
 
@@ -139,6 +144,8 @@ export default function Dashboard() {
           cuotaId: cu.id,
           prestamoId: pObj?.id || "",
           clienteNombre: cObj?.nombre_completo || "Cliente",
+          clienteTelefono: cObj?.telefono || "",
+          clientePrefijo: cObj?.prefijo_telefono || "51",
           codigoPrestamo: pObj?.codigo_prestamo || `PRES-${(pObj?.id || "").substring(0, 6).toUpperCase()}`,
           numeroCuota: cu.numero_cuota,
           direccionPuesto: cObj?.direccion_puesto || "General",
@@ -156,7 +163,18 @@ export default function Dashboard() {
     finally { setIsLoading(false); }
   };
 
-  useEffect(() => { cargarDashboard(); }, []);
+  // Suscripción en Tiempo Real y Carga Inicial
+  useEffect(() => { 
+    cargarDashboard(); 
+    
+    const channel = supabase.channel("realtime-dashboard")
+      .on("postgres_changes", { event: "*", schema: "public", table: "pagos" }, () => cargarDashboard())
+      .on("postgres_changes", { event: "*", schema: "public", table: "prestamos" }, () => cargarDashboard())
+      .on("postgres_changes", { event: "*", schema: "public", table: "cuotas" }, () => cargarDashboard())
+      .subscribe();
+      
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   const zonasDisponibles = useMemo(() => {
     const zonas = new Set<string>();
@@ -180,7 +198,7 @@ export default function Dashboard() {
           prestamo_id: itemCobrar.prestamoId,
           cuota_id: itemCobrar.cuotaId,
           monto_pagado: itemCobrar.totalPagar,
-          metodo_pago: metodoCobro, // <-- Usamos el método escogido por el usuario
+          metodo_pago: metodoCobro,
           fecha_pago: fechaActual,
           numero_operacion: operacionId,
       }]);
@@ -203,17 +221,18 @@ export default function Dashboard() {
           }).eq("id", itemCobrar.prestamoId);
       }
 
-      setItemCobrar(null); // Cerramos el modal de confirmación rápida
+      setItemCobrar(null);
       setReciboModal({
         clienteNombre: itemCobrar.clienteNombre,
+        clienteTelefono: itemCobrar.clienteTelefono,
+        clientePrefijo: itemCobrar.clientePrefijo,
         montoPagado: itemCobrar.totalPagar,
         saldoRestante: nuevoSaldo,
         codigo: itemCobrar.codigoPrestamo,
         operacionId,
         fechaHora: fechaActual,
-        metodoPago: metodoCobro, // <-- Enviamos el método al recibo oficial
+        metodoPago: metodoCobro,
       });
-      await cargarDashboard();
     } catch (err: any) { alert("Error en el cobro: " + err.message); } 
     finally { setCobrandoId(null); }
   };
@@ -333,7 +352,7 @@ export default function Dashboard() {
                             <Button
                               variant="success"
                               loading={cobrandoId === r.cuotaId}
-                              onClick={() => { setMetodoCobro("EFECTIVO"); setItemCobrar(r); }} // <-- Abre el modal de confirmación rápida
+                              onClick={() => { setMetodoCobro("EFECTIVO"); setItemCobrar(r); }}
                               className="px-4 py-2.5 font-bold shadow-sm"
                             >
                               Cobrar
@@ -368,7 +387,7 @@ export default function Dashboard() {
         {/* MODAL COBRO RÁPIDO YAPE/EFECTIVO (Ruta) */}
         {itemCobrar && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:hidden">
-            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="font-display text-lg font-bold text-slate-900">Confirmar Cobro</h3>
                 <button onClick={() => setItemCobrar(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition"><X size={20} /></button>
@@ -386,7 +405,7 @@ export default function Dashboard() {
                     <button
                       key={m}
                       onClick={() => setMetodoCobro(m)}
-                      className={cn("rounded-xl border py-2 text-xs font-bold transition", metodoCobro === m ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-sm" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100")}
+                      className={cn("rounded-xl border py-2.5 text-[11px] font-bold transition", metodoCobro === m ? "border-emerald-500 bg-emerald-500 text-slate-950 shadow-sm" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100")}
                     >
                       {m}
                     </button>
@@ -411,10 +430,11 @@ export default function Dashboard() {
         {/* Modal Recibo Oficial Visual */}
         {reciboModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm print:bg-white print:p-0">
-            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl space-y-5 text-center print:shadow-none print:p-0">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-5 sm:p-6 shadow-2xl space-y-5 text-center print:shadow-none print:p-0">
               <div className="print:hidden mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 size={32} /></div>
               <div className="print:hidden"><h3 className="font-display text-lg font-bold text-slate-900">¡Pago Registrado!</h3><p className="text-xs text-slate-500">Comprobante oficial generado exitosamente.</p></div>
 
+              {/* Contenedor del ticket para HTML2Canvas */}
               <div id="ticket-print" className="rounded-2xl bg-slate-50 p-5 text-left text-xs space-y-3 border border-slate-100 print:border-none print:bg-white print:p-0">
                 <div className="border-b border-slate-300 pb-3 mb-2 text-center">
                   <h2 className="font-display text-xl font-black text-slate-900 tracking-widest uppercase">CrediGestor</h2>
@@ -444,18 +464,23 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 print:hidden">
-                <Button variant="outline" onClick={() => setReciboModal(null)} className="px-2"><X size={18} /></Button>
-                <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold" onClick={() => window.print()}><Printer size={15} /> Imprimir</Button>
+              {/* Botones de acción actualizados */}
+              <div className="grid grid-cols-2 gap-2 print:hidden">
+                <Button className="bg-slate-800 hover:bg-slate-700 text-white font-bold" onClick={() => compartirComprobanteImagen("ticket-print")}>
+                  <Download size={15} /> Compartir PDF
+                </Button>
                 <Button
                   className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
                   onClick={() => {
-                    const msg = encodeURIComponent(`*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${reciboModal.clienteNombre}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${reciboModal.operacionId}\n*Crédito:* ${reciboModal.codigo}\n*Vía:* ${reciboModal.metodoPago}\n*Abono:* ${formatMoneda(reciboModal.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(reciboModal.saldoRestante, moneda)}\n*Fecha:* ${formatFechaCompleta(reciboModal.fechaHora)}\n\n¡Gracias por tu responsabilidad!`);
-                    window.open(`https://wa.me/?text=${msg}`, "_blank");
+                    const msg = `*CREDIGESTOR - COMPROBANTE DE PAGO*\n\nHola *${reciboModal.clienteNombre}*,\nHemos registrado tu pago con éxito.\n\n*Op:* ${reciboModal.operacionId}\n*Crédito:* ${reciboModal.codigo}\n*Vía:* ${reciboModal.metodoPago}\n*Abono:* ${formatMoneda(reciboModal.montoPagado, moneda)}\n*Saldo actual:* ${formatMoneda(reciboModal.saldoRestante, moneda)}\n*Fecha:* ${formatFechaCompleta(reciboModal.fechaHora)}\n\n¡Gracias por tu responsabilidad!`;
+                    abrirWhatsappCliente(reciboModal.clienteTelefono, reciboModal.clientePrefijo, msg);
                     setReciboModal(null);
                   }}
-                ><Share2 size={15} /> Enviar</Button>
+                >
+                  <Share2 size={15} /> Enviar
+                </Button>
               </div>
+              <Button variant="outline" className="w-full mt-2 print:hidden" onClick={() => setReciboModal(null)}>Cerrar Ventana</Button>
             </div>
           </div>
         )}
@@ -497,12 +522,20 @@ export default function Dashboard() {
 }
 
 function KpiCard({ icon: Icon, label, valor, color }: { icon: any; label: string; valor: React.ReactNode; color: string }) {
-  const styles: Record<string, string> = { emerald: "bg-emerald-50 text-emerald-600 border-emerald-100", blue: "bg-blue-50 text-blue-600 border-blue-100", amber: "bg-amber-50 text-amber-600 border-amber-100", purple: "bg-purple-50 text-purple-600 border-purple-100" };
+  const styles: Record<string, string> = { 
+    emerald: "bg-emerald-50 text-emerald-600 border-emerald-100", 
+    blue: "bg-blue-50 text-blue-600 border-blue-100", 
+    amber: "bg-amber-50 text-amber-600 border-amber-100", 
+    purple: "bg-purple-50 text-purple-600 border-purple-100" 
+  };
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className={cn("mb-3 flex h-10 w-10 items-center justify-center rounded-xl border", styles[color])}><Icon size={20} /></div>
-      <p className="tnum font-display text-2xl font-black text-slate-900">{valor}</p>
-      <p className="text-xs font-medium text-slate-500 mt-0.5">{label}</p>
+      <div className={cn("mb-3 flex h-10 w-10 items-center justify-center rounded-xl border", styles[color])}>
+        <Icon size={20} />
+      </div>
+      {/* Ajuste de texto responsive (xl a 2xl) */}
+      <p className="tnum font-display text-xl sm:text-2xl font-black text-slate-900">{valor}</p>
+      <p className="text-[11px] sm:text-xs font-medium text-slate-500 mt-0.5">{label}</p>
     </div>
   );
 }

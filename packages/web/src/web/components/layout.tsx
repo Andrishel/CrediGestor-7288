@@ -52,9 +52,9 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
 
   return (
     <div className="min-h-dvh bg-slate-100 text-slate-900 pb-24 md:pb-10 print:bg-white print:pb-0 print:min-h-0">
-      {/* 1. Header Global para Escritorio/Laptop */}
+      {/* 1. Header Global para Escritorio/Laptop y Móvil */}
       <header className="sticky top-0 z-40 w-full bg-slate-900 text-white shadow-lg print:hidden">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-3.5">
           <Link to="/" className="flex items-center gap-3 cursor-pointer">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 font-display text-xl font-black text-slate-950 shadow-md">
               C
@@ -65,6 +65,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
             </div>
           </Link>
 
+          {/* Navegación para Escritorio */}
           <nav className="hidden md:flex items-center gap-1 bg-slate-800/60 p-1.5 rounded-2xl border border-slate-700/50">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -86,7 +87,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
               );
             })}
 
-            {/* Separador vertical y Botón de Salir */}
+            {/* Separador vertical y Botón de Salir Escritorio */}
             <div className="h-5 w-[1px] bg-slate-700 mx-1" />
             <button
               onClick={() => setShowLogoutModal(true)}
@@ -97,6 +98,16 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
               <span>Salir</span>
             </button>
           </nav>
+
+          {/* Botón de Salir Móvil (Arriba a la derecha en celulares) */}
+          <button
+            onClick={() => setShowLogoutModal(true)}
+            className="flex md:hidden items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-800/80 px-3 py-1.5 text-xs font-bold text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/30 transition cursor-pointer"
+            title="Cerrar sesión"
+          >
+            <LogOut size={16} />
+            <span>Salir</span>
+          </button>
         </div>
       </header>
 
@@ -130,7 +141,7 @@ export function AppShell({ children, header, hideNav = false }: AppShellProps) {
               );
             })}
 
-            {/* Botón de Salir Móvil con Modal */}
+            {/* Botón de Salir en barra inferior móvil */}
             <button
               onClick={() => setShowLogoutModal(true)}
               className="flex flex-col items-center gap-1 px-3 py-1 text-xs font-medium text-rose-500 hover:text-rose-700 transition cursor-pointer"
