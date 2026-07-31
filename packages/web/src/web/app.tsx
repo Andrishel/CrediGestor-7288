@@ -1,5 +1,7 @@
 import { Route, Switch } from "wouter";
 import { Provider } from "./components/provider";
+import { ProtectedRoute } from "./components/protected-route"; // <--- Importamos el guard
+
 import SignInPage from "./pages/sign-in";
 import Dashboard from "./pages/index";
 import ClientesPage from "./pages/clientes";
@@ -17,45 +19,87 @@ function App() {
   return (
     <Provider>
       <Switch>
+        {/* Ruta Pública (Acceso libre) */}
         <Route path="/sign-in" component={SignInPage} />
+
+        {/* Rutas Privadas Protegidas (Exigen autenticación) */}
         <Route path="/">
-          <Dashboard />
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/clientes">
-          <ClientesPage />
+          <ProtectedRoute>
+            <ClientesPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/clientes/nuevo">
-          <ClienteNuevoPage />
+          <ProtectedRoute>
+            <ClienteNuevoPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/clientes/:id/editar">
-          <ClienteNuevoPage />
+          <ProtectedRoute>
+            <ClienteNuevoPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/clientes/:id">
-          <ClienteDetallePage />
+          <ProtectedRoute>
+            <ClienteDetallePage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/prestamos">
-          <PrestamosPage />
+          <ProtectedRoute>
+            <PrestamosPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/prestamos/nuevo">
-          <PrestamoNuevoPage />
+          <ProtectedRoute>
+            <PrestamoNuevoPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/prestamos/:id">
-          <PrestamoDetallePage />
+          <ProtectedRoute>
+            <PrestamoDetallePage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/panderos">
-          <PanderosPage />
+          <ProtectedRoute>
+            <PanderosPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/panderos/nuevo">
-          <PanderoNuevoPage />
+          <ProtectedRoute>
+            <PanderoNuevoPage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/panderos/:id">
-          <PanderoDetallePage />
+          <ProtectedRoute>
+            <PanderoDetallePage />
+          </ProtectedRoute>
         </Route>
+
         <Route path="/config">
-          <ConfigPage />
+          <ProtectedRoute>
+            <ConfigPage />
+          </ProtectedRoute>
         </Route>
+
+        {/* Fallback general redirigiendo al Dashboard protegido */}
         <Route>
-          <Dashboard />
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
         </Route>
       </Switch>
     </Provider>
